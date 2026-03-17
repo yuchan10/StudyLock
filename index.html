@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#000000" />
+  <title>StudyLock - Focus Mode</title>
+  <link href="style.css" rel="stylesheet" />
+</head>
+<body>
+
+<div class="phone-shell">
+
+  <!-- 로그인 화면 -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-inner">
+      <div class="login-logo">StudyLock</div>
+      <div class="login-tagline">집중이 습관이 되는 순간</div>
+      <div class="login-form">
+        <input id="login-name-input" class="login-input" type="text" placeholder="이름을 입력하세요" maxlength="10" autocomplete="off" />
+        <button id="login-btn" class="btn-primary login-btn">시작하기</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="timer-overlay" class="timer-overlay" style="display: none;"> 
+    <div class="overlay-title">Focus Mode</div> 
+    <div id="session-elapsed" class="overlay-time">00:00</div> 
+    
+    <div id="participant-grid" class="participant-grid">
+      </div>
+
+    <button class="btn-primary" style="max-width: 200px; background: transparent; border: 1px solid #fff; color: #fff;" id="overlay-stop-btn">
+      정지
+    </button> 
+  </div>
+
+  <div class="status-bar">
+    <span id="clock">00:00</span>
+    <span>StudyLock</span>
+  </div>
+
+  <div class="scroll-area">
+    <div id="home-panel" class="tab-panel active">
+      <div class="greeting-row">
+        <div>
+          <div class="greeting-name">안녕, 지민</div>
+          <div id="greeting-sub" class="greeting-sub">오직 공부에만 집중할 시간입니다.</div>
+        </div>
+        <div id="user-avatar" class="user-avatar">지민</div>
+      </div>
+
+      <div class="card">
+        <div class="study-card-top">
+          <div>
+            <div class="study-label">오늘의 기록</div>
+            <div id="study-time-display" class="study-time-display">0분</div>
+            <div id="study-goal-label" class="study-goal-label">목표 4시간 · 0%</div>
+          </div>
+          <div class="points-badge">
+            <div id="points-display" class="points-display">0 pt</div>
+          </div>
+        </div>
+        <div class="progress-bar-bg"><div id="study-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
+        <button id="study-btn" class="btn-primary">시작</button>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-label">남은 앱 시간</div>
+          <div id="remain-app-time" class="stat-value">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">그룹 순위</div>
+          <div id="my-rank" class="stat-value">#—</div>
+        </div>
+      </div>
+
+      <div class="section-title">앱 제한 상태</div>
+      <div id="limits-list" style="margin-bottom: 30px;"></div>
+
+      <div class="section-title">스터디 그룹</div>
+      <div class="card" style="display:flex; align-items:center; justify-content:space-between;">
+        <div>
+          <div id="group-name" style="font-weight:700; font-size:1.1rem; margin-bottom:4px;">—</div>
+          <div id="group-controller" style="font-size:0.8rem; color:var(--text-sub);">—</div>
+        </div>
+        <div id="group-avatars" style="filter: grayscale(100%);"></div>
+      </div>
+    </div>
+
+    <div id="stats-panel" class="tab-panel">
+      <div class="section-title" style="font-size:1.5rem; margin-bottom:20px;">기록</div>
+      <div class="stats-row">
+        <div class="stat-card"><div class="stat-label">오늘 공부(분)</div><div id="total-study-min" class="stat-value">—</div></div>
+        <div class="stat-card"><div class="stat-label">연속 달성</div><div id="streak-big" class="stat-value">—</div></div>
+      </div>
+      <div class="section-title">앱별 상세 현황</div>
+      <div id="limits-list-stats"></div>
+    </div>
+
+    <div id="rank-panel" class="tab-panel">
+      <div class="section-title" style="font-size:1.5rem; margin-bottom:20px;">랭킹</div>
+      <div id="leaderboard-list"></div>
+    </div>
+
+    <div id="settings-panel" class="tab-panel">
+      <div class="section-title" style="font-size:1.5rem; margin-bottom:20px;">설정</div>
+      <button id="reset-btn" class="btn-primary" style="background:transparent; border:1px solid #555; color:#aaa; margin-bottom: 12px;">데이터 초기화</button>
+      <button id="logout-btn" class="btn-primary" style="background:transparent; border:1px solid #333; color:#555;">로그아웃</button>
+    </div>
+  </div>
+
+  <nav class="nav-bar">
+    <button class="nav-item active" data-tab="home"><span class="nav-icon">⌂</span><span>홈</span></button>
+    <button class="nav-item" data-tab="stats"><span class="nav-icon">≡</span><span>통계</span></button>
+    <button class="nav-item" data-tab="rank"><span class="nav-icon">★</span><span>랭킹</span></button>
+    <button class="nav-item" data-tab="settings"><span class="nav-icon">⚙</span><span>설정</span></button>
+  </nav>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
