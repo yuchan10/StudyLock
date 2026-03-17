@@ -329,8 +329,10 @@ const App = {
   },
 
   _loadProgress() {
-    try { return JSON.parse(localStorage.getItem('studylock_progress') || '{}'); }
-    catch { return {}; }
+    try {
+      const d = JSON.parse(localStorage.getItem('studylock_progress') || '{}');
+      return { totalStudySec: d.totalStudySec || 0, points: d.points || 0 };
+    } catch { return { totalStudySec: 0, points: 0 }; }
   },
 
   _enterApp(user) {
@@ -382,8 +384,13 @@ const App = {
     };
 
     document.getElementById('logout-btn').onclick = () => {
+      // 타이머 실행 중이면 먼저 저장
+      if (this.state.timerInterval) {
+        clearInterval(this.state.timerInterval);
+        this.state.points += Math.floor(this.state.sessionSec / 60) * 10;
+      }
+      this.saveProgress();
       localStorage.removeItem('studylock_auth');
-      localStorage.removeItem('studylock_progress');
       if (window.google?.accounts?.id) google.accounts.id.disableAutoSelect();
       location.reload();
     };
@@ -432,6 +439,8 @@ const App = {
       this.state.sessionSec++; this.state.totalStudySec++;
       const m = Math.floor(this.state.sessionSec/60), s = this.state.sessionSec%60;
       document.getElementById('session-elapsed').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      // 10초마다 자동 저장 — 중간에 앱 종료/로그아웃해도 기록 보존
+      if (this.state.sessionSec % 10 === 0) this.saveProgress();
     }, 1000);
   },
 
