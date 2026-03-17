@@ -5,34 +5,95 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="theme-color" content="#000000" />
   <title>StudyLock - Focus Mode</title>
-  <link href="style.css" rel="stylesheet" />
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    /* ── 미니멀 흑백 테마 ── */
+    :root {
+      --bg-color: #000000; --surface: #111111; --surface-border: #333333;
+      --text-main: #ffffff; --text-sub: #888888; --accent: #ffffff;
+    }
+    
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, sans-serif; }
+    body { background-color: #1a1a1a; display: flex; justify-content: center; align-items: center; min-height: 100vh; color: var(--text-main); overflow: hidden; }
+    
+    .phone-shell { position: relative; width: 100%; max-width: 400px; height: 100vh; max-height: 850px; background-color: var(--bg-color); overflow: hidden; display: flex; flex-direction: column; border: 1px solid #222; }
+    
+    /* 상단바 및 네비 */
+    .status-bar { display: flex; justify-content: space-between; padding: 12px 20px; font-size: 14px; font-weight: 600; z-index: 10; }
+    .scroll-area { flex: 1; overflow-y: auto; padding: 20px; padding-bottom: 100px; scrollbar-width: none; }
+    .scroll-area::-webkit-scrollbar { display: none; }
+    .nav-bar { position: absolute; bottom: 0; width: 100%; display: flex; justify-content: space-around; background: rgba(0,0,0,0.9); backdrop-filter: blur(10px); padding: 15px 0 25px 0; border-top: 1px solid var(--surface-border); }
+    .nav-item { background: none; border: none; color: var(--text-sub); display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; font-size: 0.75rem; }
+    .nav-item.active { color: var(--text-main); }
+    
+    /* 패널 제어 */
+    .tab-panel { display: none; animation: fadeIn 0.3s ease; }
+    .tab-panel.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* 로그인 화면 */
+    .login-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-color); z-index: 10000; display: flex; align-items: center; justify-content: center; transition: 0.5s; }
+    .login-inner { text-align: center; width: 80%; }
+    .login-logo { font-size: 2.5rem; font-weight: 800; margin-bottom: 10px; letter-spacing: -1px; }
+    .login-tagline { color: var(--text-sub); margin-bottom: 40px; }
+    .login-input { width: 100%; padding: 15px; border-radius: 12px; border: 1px solid var(--surface-border); background: var(--surface); color: var(--text-main); font-size: 1rem; margin-bottom: 15px; text-align: center; outline: none; }
+    
+    /* 컴포넌트 스타일 */
+    .btn-primary { width: 100%; padding: 16px; border-radius: 12px; background: var(--text-main); color: var(--bg-color); font-size: 1rem; font-weight: 700; border: none; cursor: pointer; }
+    .card { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 16px; padding: 20px; margin-bottom: 20px; }
+    .section-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 15px; }
+    
+    /* 홈 화면 레이아웃 */
+    .greeting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
+    .greeting-name { font-size: 1.5rem; font-weight: 800; }
+    .greeting-sub { color: var(--text-sub); font-size: 0.85rem; margin-top: 5px; }
+    .user-avatar { width: 45px; height: 45px; background: #333; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 600; }
+    
+    .study-card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px; }
+    .study-label { font-size: 0.8rem; color: var(--text-sub); }
+    .study-time-display { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin: 5px 0; }
+    .study-goal-label { font-size: 0.75rem; color: #666; }
+    .points-badge { background: #222; padding: 5px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; }
+    
+    .progress-bar-bg { width: 100%; height: 6px; background: #222; border-radius: 3px; margin-bottom: 20px; overflow: hidden; }
+    .progress-bar-fill { height: 100%; background: var(--text-main); transition: 0.3s; }
+    
+    .stats-row { display: flex; gap: 12px; margin-bottom: 25px; }
+    .stat-card { flex: 1; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 12px; padding: 15px; text-align: center; }
+    .stat-label { font-size: 0.75rem; color: var(--text-sub); margin-bottom: 8px; }
+    .stat-value { font-size: 1.2rem; font-weight: 700; }
+
+    /* 타이머 오버레이 */
+    .timer-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-color); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+    .overlay-title { color: var(--text-sub); letter-spacing: 2px; font-size: 0.85rem; margin-bottom: 30px; }
+    .overlay-time { font-size: 4.5rem; font-weight: 200; margin-bottom: 40px; font-variant-numeric: tabular-nums; }
+    .participant-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; margin-bottom: 40px; }
+    .p-card { border: 1px solid var(--surface-border); border-radius: 10px; padding: 12px 0; text-align: center; background: transparent; }
+    .p-card.active { border-color: #fff; background: #111; }
+    .p-avatar { font-size: 1.2rem; margin-bottom: 4px; }
+    .p-name { font-size: 0.7rem; color: #888; }
+  </style>
 </head>
 <body>
 
 <div class="phone-shell">
 
-  <!-- 로그인 화면 -->
   <div id="login-screen" class="login-screen">
     <div class="login-inner">
       <div class="login-logo">StudyLock</div>
       <div class="login-tagline">집중이 습관이 되는 순간</div>
       <div class="login-form">
-        <input id="login-name-input" class="login-input" type="text" placeholder="이름을 입력하세요" maxlength="10" autocomplete="off" />
-        <button id="login-btn" class="btn-primary login-btn">시작하기</button>
+        <input id="login-name-input" class="login-input" type="text" placeholder="이름을 입력하세요" maxlength="6" autocomplete="off" />
+        <button id="login-btn" class="btn-primary">시작하기</button>
       </div>
     </div>
   </div>
 
   <div id="timer-overlay" class="timer-overlay" style="display: none;"> 
-    <div class="overlay-title">Focus Mode</div> 
+    <div class="overlay-title">FOCUS MODE</div> 
     <div id="session-elapsed" class="overlay-time">00:00</div> 
-    
-    <div id="participant-grid" class="participant-grid">
-      </div>
-
-    <button class="btn-primary" style="max-width: 200px; background: transparent; border: 1px solid #fff; color: #fff;" id="overlay-stop-btn">
-      정지
-    </button> 
+    <div id="participant-grid" class="participant-grid"></div>
+    <button class="btn-primary" style="max-width: 200px; background: transparent; border: 1px solid #fff; color: #fff;" id="overlay-stop-btn">집중 종료</button> 
   </div>
 
   <div class="status-bar">
@@ -44,10 +105,10 @@
     <div id="home-panel" class="tab-panel active">
       <div class="greeting-row">
         <div>
-          <div class="greeting-name">안녕, 지민</div>
-          <div id="greeting-sub" class="greeting-sub">오직 공부에만 집중할 시간입니다.</div>
+          <div class="greeting-name" id="greeting-name-display">안녕, 유저</div>
+          <div class="greeting-sub">오직 공부에만 집중할 시간입니다.</div>
         </div>
-        <div id="user-avatar" class="user-avatar">지민</div>
+        <div id="user-avatar" class="user-avatar">?</div>
       </div>
 
       <div class="card">
@@ -55,11 +116,9 @@
           <div>
             <div class="study-label">오늘의 기록</div>
             <div id="study-time-display" class="study-time-display">0분</div>
-            <div id="study-goal-label" class="study-goal-label">목표 4시간 · 0%</div>
+            <div id="study-goal-label" class="study-goal-label">목표 2시간 · 달성 중</div>
           </div>
-          <div class="points-badge">
-            <div id="points-display" class="points-display">0 pt</div>
-          </div>
+          <div class="points-badge"><span id="points-display">0</span> pt</div>
         </div>
         <div class="progress-bar-bg"><div id="study-progress-fill" class="progress-bar-fill" style="width:0%"></div></div>
         <button id="study-btn" class="btn-primary">시작</button>
@@ -68,40 +127,42 @@
       <div class="stats-row">
         <div class="stat-card">
           <div class="stat-label">남은 앱 시간</div>
-          <div id="remain-app-time" class="stat-value">—</div>
+          <div id="remain-app-time" class="stat-value">60분</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">그룹 순위</div>
-          <div id="my-rank" class="stat-value">#—</div>
+          <div id="my-rank" class="stat-value">매칭 중</div>
         </div>
       </div>
 
       <div class="section-title">앱 제한 상태</div>
-      <div id="limits-list" style="margin-bottom: 30px;"></div>
+      <div id="limits-list" style="margin-bottom: 30px; font-size: 0.85rem; color:#aaa; padding: 15px; border:1px solid #333; border-radius:12px;">
+        📱 인스타그램: 잠김<br>📺 유튜브: 잠김
+      </div>
 
       <div class="section-title">스터디 그룹</div>
       <div class="card" style="display:flex; align-items:center; justify-content:space-between;">
         <div>
-          <div id="group-name" style="font-weight:700; font-size:1.1rem; margin-bottom:4px;">—</div>
-          <div id="group-controller" style="font-size:0.8rem; color:var(--text-sub);">—</div>
+          <div id="group-name" style="font-weight:700; font-size:1.1rem; margin-bottom:4px;">매칭 대기 중...</div>
+          <div id="group-controller" style="font-size:0.8rem; color:var(--text-sub);">관리자: 찾는 중</div>
         </div>
-        <div id="group-avatars" style="filter: grayscale(100%);"></div>
+        <div id="group-avatars" style="filter: grayscale(100%); font-size:1.5rem;">⏳</div>
       </div>
     </div>
 
     <div id="stats-panel" class="tab-panel">
       <div class="section-title" style="font-size:1.5rem; margin-bottom:20px;">기록</div>
       <div class="stats-row">
-        <div class="stat-card"><div class="stat-label">오늘 공부(분)</div><div id="total-study-min" class="stat-value">—</div></div>
-        <div class="stat-card"><div class="stat-label">연속 달성</div><div id="streak-big" class="stat-value">—</div></div>
+        <div class="stat-card"><div class="stat-label">오늘 공부(분)</div><div id="total-study-min" class="stat-value">0</div></div>
+        <div class="stat-card"><div class="stat-label">연속 달성</div><div id="streak-big" class="stat-value">1일</div></div>
       </div>
-      <div class="section-title">앱별 상세 현황</div>
-      <div id="limits-list-stats"></div>
     </div>
 
     <div id="rank-panel" class="tab-panel">
-      <div class="section-title" style="font-size:1.5rem; margin-bottom:20px;">랭킹</div>
-      <div id="leaderboard-list"></div>
+      <div class="section-title" style="font-size:1.5rem; margin-bottom:20px;">실시간 랭킹</div>
+      <div id="leaderboard-list">
+        <p style="color:#666; font-size:0.9rem; text-align:center;">그룹 매칭이 완료되면 표시됩니다.</p>
+      </div>
     </div>
 
     <div id="settings-panel" class="tab-panel">
@@ -120,6 +181,190 @@
 
 </div>
 
-<script src="app.js"></script>
+<script>
+const socket = io();
+
+const App = {
+  state: {
+    userName: '',
+    myId: null,
+    groupId: null,
+    groupData: null,
+    totalStudySec: 0,
+    points: 0,
+    sessionSec: 0,
+    timerInterval: null
+  },
+
+  init() {
+    this.startClock();
+    this.bindEvents();
+    
+    // 로컬 스토리지 확인
+    const saved = localStorage.getItem('studylock_focus');
+    if (saved) {
+      const data = JSON.parse(saved);
+      this.state.userName = data.userName;
+      this.state.totalStudySec = data.totalStudySec || 0;
+      this.state.points = data.points || 0;
+      this.login(this.state.userName);
+    }
+  },
+
+  bindEvents() {
+    // 로그인 처리
+    document.getElementById('login-btn').onclick = () => {
+      const name = document.getElementById('login-name-input').value.trim();
+      if (!name) return alert('이름을 입력해주세요.');
+      this.login(name);
+    };
+
+    // 하단 탭 네비게이션
+    document.querySelectorAll('.nav-item').forEach(btn => {
+      btn.onclick = () => {
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        document.getElementById(btn.dataset.tab + '-panel').classList.add('active');
+        btn.classList.add('active');
+      };
+    });
+
+    // 공부 제어
+    document.getElementById('study-btn').onclick = () => this.startStudy();
+    document.getElementById('overlay-stop-btn').onclick = () => this.stopStudy();
+
+    // 설정
+    document.getElementById('logout-btn').onclick = () => {
+      localStorage.removeItem('studylock_focus');
+      location.reload();
+    };
+
+    // Socket 이벤트 수신
+    socket.on('matchComplete', (data) => {
+      this.state.groupId = data.groupId;
+      this.state.groupData = data.groupData;
+      this.state.myId = data.myId;
+      this.renderGroupInfo();
+    });
+
+    socket.on('groupUpdate', (data) => {
+      this.state.groupData = data;
+      this.renderGroupInfo();
+    });
+  },
+
+  login(name) {
+    this.state.userName = name;
+    this.saveData();
+    
+    // UI 업데이트
+    document.getElementById('login-screen').style.opacity = '0';
+    setTimeout(() => document.getElementById('login-screen').style.display = 'none', 500);
+    
+    document.getElementById('greeting-name-display').textContent = `안녕, ${name}`;
+    document.getElementById('user-avatar').textContent = name.substring(0, 1);
+    this.updateDashboard();
+
+    // 실시간 매칭 참여
+    socket.emit('joinMatch', { name: name });
+  },
+
+  renderGroupInfo() {
+    const { groupData, myId } = this.state;
+    if (!groupData) return;
+
+    // 홈 화면 그룹 영역 업데이트
+    document.getElementById('group-name').textContent = groupData.name;
+    const adminUser = groupData.members.find(m => m.id === groupData.adminId);
+    document.getElementById('group-controller').textContent = `현재 관리자: ${adminUser.id === myId ? '본인' : adminUser.name}`;
+    document.getElementById('group-avatars').textContent = '👥';
+    document.getElementById('group-avatars').style.filter = 'none';
+
+    // 랭킹 계산
+    const sorted = [...groupData.members].sort((a, b) => b.studySec - a.studySec);
+    const myRankIndex = sorted.findIndex(m => m.id === myId) + 1;
+    document.getElementById('my-rank').textContent = `#${myRankIndex}위`;
+
+    // 랭킹 탭 렌더링
+    const list = document.getElementById('leaderboard-list');
+    list.innerHTML = sorted.map((m, idx) => `
+      <div style="display:flex; justify-content:space-between; padding:15px; background:var(--surface); border:1px solid #333; border-radius:12px; margin-bottom:10px;">
+        <span style="font-weight:${m.id === myId ? 'bold' : 'normal'}; color:${m.id === myId ? '#fff' : '#aaa'}">
+          ${idx + 1}. ${m.name} ${m.id === myId ? '(나)' : ''}
+        </span>
+        <span style="color:${m.status === 'studying' ? '#fff' : '#555'}">
+          ${m.status === 'studying' ? '● 집중 중' : Math.floor(m.studySec / 60) + '분'}
+        </span>
+      </div>
+    `).join('');
+  },
+
+  startStudy() {
+    if (!this.state.groupId) return alert('그룹 매칭이 완료될 때까지 잠시 기다려주세요!');
+    
+    document.getElementById('timer-overlay').style.display = 'flex';
+    this.state.sessionSec = 0;
+    socket.emit('startStudy', this.state.groupId);
+
+    // 오버레이 참가자 현황 렌더링
+    const grid = document.getElementById('participant-grid');
+    grid.innerHTML = this.state.groupData.members.map(m => `
+      <div class="p-card ${m.id === this.state.myId ? 'active' : ''}">
+        <div class="p-avatar">👤</div>
+        <div class="p-name">${m.name}</div>
+      </div>
+    `).join('');
+
+    this.state.timerInterval = setInterval(() => {
+      this.state.sessionSec++;
+      this.state.totalStudySec++;
+      
+      const min = Math.floor(this.state.sessionSec / 60);
+      const s = this.state.sessionSec % 60;
+      document.getElementById('session-elapsed').textContent = `${String(min).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    }, 1000);
+  },
+
+  stopStudy() {
+    clearInterval(this.state.timerInterval);
+    document.getElementById('timer-overlay').style.display = 'none';
+    
+    // 포인트 획득 로직 (1분당 10포인트)
+    this.state.points += Math.floor(this.state.sessionSec / 60) * 10;
+    
+    socket.emit('stopStudy', { groupId: this.state.groupId, sessionSec: this.state.sessionSec });
+    this.saveData();
+    this.updateDashboard();
+  },
+
+  updateDashboard() {
+    const min = Math.floor(this.state.totalStudySec / 60);
+    document.getElementById('study-time-display').textContent = `${min}분`;
+    document.getElementById('total-study-min').textContent = min;
+    document.getElementById('points-display').textContent = this.state.points;
+    
+    // 프로그레스 바 (최대 120분 기준)
+    const pct = Math.min((min / 120) * 100, 100);
+    document.getElementById('study-progress-fill').style.width = pct + '%';
+  },
+
+  saveData() {
+    localStorage.setItem('studylock_focus', JSON.stringify({
+      userName: this.state.userName,
+      totalStudySec: this.state.totalStudySec,
+      points: this.state.points
+    }));
+  },
+
+  startClock() {
+    setInterval(() => {
+      const now = new Date();
+      document.getElementById('clock').textContent = now.getHours().toString().padStart(2,'0') + ":" + now.getMinutes().toString().padStart(2,'0');
+    }, 1000);
+  }
+};
+
+document.addEventListener('DOMContentLoaded', () => App.init());
+</script>
 </body>
 </html>
