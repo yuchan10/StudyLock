@@ -302,6 +302,9 @@
 <script>
 const socket = (typeof io !== 'undefined') ? io() : { emit:()=>{}, on:()=>{} };
 
+// ★ Railway 배포 후 본인 서버 URL로 교체하세요
+const SERVER_URL = 'https://YOUR_RAILWAY_URL';
+
 const App = {
   state: {
     userName:'', email:'', picture:'', googleId:'',
@@ -335,11 +338,45 @@ const App = {
     } catch { return { totalStudySec: 0, points: 0 }; }
   },
 
-  _enterApp(user) {
+  // 서버에서 데이터 불러오기 (로그인 직후 호출)
+  async _fetchServerProgress(googleId) {
+    try {
+      const res = await fetch(`${SERVER_URL}/api/progress/${googleId}`);
+      if (!res.ok) throw new Error();
+      return await res.json();
+    } catch {
+      return null; // 서버 연결 실패 시 로컬 데이터 사용
+    }
+  },
+
+  // 서버에 데이터 저장
+  async _pushServerProgress() {
+    if (!this.state.googleId) return;
+    try {
+      await fetch(`${SERVER_URL}/api/progress/${this.state.googleId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          totalStudySec: this.state.totalStudySec,
+          points: this.state.points
+        })
+      });
+    } catch {} // 실패해도 로컬엔 저장됨
+  },
+
+  async _enterApp(user) {
     this.state.userName = user.name || user.userName || '사용자';
     this.state.email    = user.email   || '';
     this.state.picture  = user.picture || '';
     this.state.googleId = user.googleId || '';
+
+    // 서버 데이터 우선, 없으면 로컬 폴백
+    const local  = this._loadProgress();
+    const server = await this._fetchServerProgress(this.state.googleId);
+    const prog   = server || local;
+    // 둘 다 있으면 더 큰 값 사용 (여러 기기 중 최대치)
+    this.state.totalStudySec = Math.max(local.totalStudySec, prog.totalStudySec);
+    this.state.points        = Math.max(local.points, prog.points);
 
     const ls = document.getElementById('login-screen');
     ls.classList.add('hide');
@@ -462,9 +499,13 @@ const App = {
   },
 
   saveProgress() {
+    // 로컬 저장
     localStorage.setItem('studylock_progress', JSON.stringify({
-      totalStudySec: this.state.totalStudySec, points: this.state.points
+      totalStudySec: this.state.totalStudySec,
+      points: this.state.points
     }));
+    // 서버 동기화 (비동기, 실패해도 무관)
+    this._pushServerProgress();
   },
 
   startClock() {
