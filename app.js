@@ -49,7 +49,11 @@ const App = {
   // ── 진행 데이터 (서버에서 불러오기) ─────────────────────
   async _fetchServerProgress(googleId) {
     try {
-      const res = await fetch(`${SERVER_URL}/api/progress/${googleId}`);
+      const token = this._getToken();
+      if (!token) return null;
+      const res = await fetch(`${SERVER_URL}/api/progress/${googleId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (!res.ok) throw new Error();
       return await res.json();
     } catch {
@@ -61,15 +65,28 @@ const App = {
   async _pushServerProgress() {
     if (!this.state.googleId) return;
     try {
+      const token = this._getToken();
+      if (!token) return;
       await fetch(`${SERVER_URL}/api/progress/${this.state.googleId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           totalStudySec: this.state.totalStudySec,
           points: this.state.points
         })
       });
     } catch {} // 실패해도 로컬엔 저장됨
+  },
+
+  // ── Google 토큰 가져오기 ──────────────────────────────────
+  _getToken() {
+    try {
+      const auth = JSON.parse(localStorage.getItem('studylock_auth') || 'null');
+      return auth?.credential || null;
+    } catch { return null; }
   },
 
   // ── 앱 진입 (로그인 성공 후) ─────────────────────────────
@@ -273,10 +290,11 @@ function handleGoogleLogin(response) {
       atob(b64).split('').map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
     ));
     const user = {
-      name:     data.name || data.given_name || '사용자',
-      email:    data.email    || '',
-      picture:  data.picture  || '',
-      googleId: data.sub      || ''
+      name:       data.name || data.given_name || '사용자',
+      email:      data.email    || '',
+      picture:    data.picture  || '',
+      googleId:   data.sub      || '',
+      credential: response.credential  // 서버 인증용 토큰 보관
     };
     localStorage.setItem('studylock_auth', JSON.stringify(user));
     App._enterApp(user);

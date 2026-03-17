@@ -13,55 +13,76 @@ const io = new Server(server, {
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// ── CORS (GitHub Pages → Railway 요청 허용) ──
+// ── CORS ──
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
 
-// ── 유저 데이터 저장소 (메모리 + JSON 파일 백업) ──
+// ── Google ID Token 검증 ──
+// 외부 라이브러리 없이 Google의 공개 API로 검증
+async function verifyGoogleToken(token) {
+  try {
+    const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${token}`);
+    if (!res.ok) return null;
+    const payload = await res.json();
+    // 클라이언트 ID가 맞는지 확인
+    if (payload.aud !== '873434718410-v9k4a2ug741j8ka6sc5mnqjmobb7a2f0.apps.googleusercontent.com') return null;
+    return payload; // { sub: googleId, email, name, ... }
+  } catch { return null; }
+}
+
+// ── 인증 미들웨어 ──
+async function requireAuth(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: '토큰 없음' });
+
+  const payload = await verifyGoogleToken(token);
+  if (!payload) return res.status(401).json({ error: '유효하지 않은 토큰' });
+
+  // URL의 googleId와 토큰의 sub(실제 구글ID)가 일치하는지 확인
+  if (req.params.googleId && req.params.googleId !== payload.sub) {
+    return res.status(403).json({ error: '권한 없음' });
+  }
+
+  req.googleUser = payload;
+  next();
+}
+
+// ── 유저 데이터 저장소 ──
 const DATA_FILE = path.join(__dirname, 'userdata.json');
 
 function loadUserData() {
   try {
-    if (fs.existsSync(DATA_FILE)) {
-      return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    }
+    if (fs.existsSync(DATA_FILE)) return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   } catch {}
   return {};
 }
 
 function saveUserData() {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(userData, null, 2));
-  } catch (e) {
-    console.error('저장 실패:', e.message);
-  }
+  try { fs.writeFileSync(DATA_FILE, JSON.stringify(userData, null, 2)); }
+  catch (e) { console.error('저장 실패:', e.message); }
 }
 
-let userData = loadUserData(); // { [googleId]: { totalStudySec, points, lastSaved } }
-
-// 30초마다 파일에 백업
+let userData = loadUserData();
 setInterval(saveUserData, 30000);
 
-// ── REST API: 데이터 불러오기 ──
-app.get('/api/progress/:googleId', (req, res) => {
-  const { googleId } = req.params;
-  const data = userData[googleId] || { totalStudySec: 0, points: 0 };
+// ── REST API: 데이터 불러오기 (인증 필요) ──
+app.get('/api/progress/:googleId', requireAuth, (req, res) => {
+  const data = userData[req.params.googleId] || { totalStudySec: 0, points: 0 };
   res.json(data);
 });
 
-// ── REST API: 데이터 저장 ──
-app.post('/api/progress/:googleId', (req, res) => {
+// ── REST API: 데이터 저장 (인증 필요) ──
+app.post('/api/progress/:googleId', requireAuth, (req, res) => {
   const { googleId } = req.params;
   const { totalStudySec, points } = req.body;
   if (typeof totalStudySec !== 'number' || typeof points !== 'number') {
     return res.status(400).json({ error: 'invalid data' });
   }
-  // 더 큰 값 기준으로 머지 (두 기기 중 더 많이 공부한 쪽 유지)
   const existing = userData[googleId] || { totalStudySec: 0, points: 0 };
   userData[googleId] = {
     totalStudySec: Math.max(existing.totalStudySec, totalStudySec),
