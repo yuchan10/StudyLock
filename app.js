@@ -5,6 +5,17 @@
 const Auth = (() => {
   const AUTH_KEY = 'studylock_auth';
 
+  // JWT 페이로드 파싱 (Google credential 디코딩용)
+  function _parseJwt(token) {
+    try {
+      const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      const json = decodeURIComponent(
+        atob(base64).split('').map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
+      );
+      return JSON.parse(json);
+    } catch { return null; }
+  }
+
   function getUser() {
     try {
       const raw = localStorage.getItem(AUTH_KEY);
@@ -12,22 +23,34 @@ const Auth = (() => {
     } catch { return null; }
   }
 
-  function login(name) {
-    const user = { name: name.trim() };
+  // Google 콜백에서 credential(JWT) 받아 저장
+  function loginWithCredential(credential) {
+    const payload = _parseJwt(credential);
+    if (!payload) return null;
+    const user = {
+      name: payload.name || payload.given_name || '사용자',
+      email: payload.email || '',
+      picture: payload.picture || '',
+      googleId: payload.sub || '',
+    };
     localStorage.setItem(AUTH_KEY, JSON.stringify(user));
     return user;
   }
 
   function logout() {
     localStorage.removeItem(AUTH_KEY);
+    if (window.google && google.accounts && google.accounts.id) {
+      google.accounts.id.disableAutoSelect();
+    }
   }
 
+  // googleId 또는 name 둘 다 허용 (하위 호환)
   function isLoggedIn() {
     const user = getUser();
-    return user && user.name && user.name.length > 0;
+    return !!(user && (user.googleId || (user.name && user.name.length > 0)));
   }
 
-  return { getUser, login, logout, isLoggedIn };
+  return { getUser, loginWithCredential, logout, isLoggedIn };
 })();
 
 const Storage = (() => {
@@ -253,22 +276,14 @@ const App = (() => {
   }
 
   function _bindLoginEvents() {
-    const btn = UI.$('login-btn');
-    const input = UI.$('login-name-input');
-
-    function doLogin() {
-      const name = (input ? input.value : '').trim();
-      if (!name) {
-        if (input) { input.style.borderColor = '#fff'; input.focus(); }
-        return;
-      }
-      Auth.login(name);
+    // Google GSI가 호출하는 전역 콜백
+    window.handleGoogleLogin = function(response) {
+      if (!response || !response.credential) return;
+      const user = Auth.loginWithCredential(response.credential);
+      if (!user) return;
       _hideLoginScreen();
       _launchApp();
-    }
-
-    if (btn) btn.addEventListener('click', doLogin);
-    if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+    };
   }
 
   function _launchApp() {
@@ -329,8 +344,13 @@ const App = (() => {
         Auth.logout();
         _showLoginScreen();
         _bindLoginEvents();
-        const input = UI.$('login-name-input');
-        if (input) { input.value = ''; input.style.borderColor = ''; }
+        // GSI 버튼 재렌더링
+        if (window.google && google.accounts && google.accounts.id) {
+          google.accounts.id.renderButton(
+            document.querySelector('.g_id_signin'),
+            { type: 'standard', size: 'large', theme: 'outline', text: 'signin_with', shape: 'rectangular', logo_alignment: 'left', width: 280 }
+          );
+        }
       });
     }
   }

@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#000000" />
   <title>StudyLock - Focus Mode</title>
   <script src="/socket.io/socket.io.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     /* ── 미니멀 흑백 테마 ── */
     :root {
@@ -72,6 +73,20 @@
     .p-card.active { border-color: #fff; background: #111; }
     .p-avatar { font-size: 1.2rem; margin-bottom: 4px; }
     .p-name { font-size: 0.7rem; color: #888; }
+
+    /* 로그인 화면 */
+    .login-screen {
+      position: absolute; inset: 0; z-index: 99999;
+      background: var(--bg-color);
+      display: flex; align-items: center; justify-content: center;
+      transition: opacity 0.5s ease;
+    }
+    .login-inner { width: 100%; padding: 40px 32px; display: flex; flex-direction: column; align-items: center; }
+    .login-logo { font-size: 2.2rem; font-weight: 800; letter-spacing: -1px; color: var(--text-main); margin-bottom: 10px; }
+    .login-tagline { font-size: 0.9rem; color: var(--text-sub); margin-bottom: 60px; letter-spacing: 0.5px; }
+    .login-google-wrap { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+    .login-google-wrap .g_id_signin { border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px var(--surface-border); }
+    .login-notice { font-size: 0.78rem; color: var(--text-sub); text-align: center; }
   </style>
 </head>
 <body>
@@ -82,9 +97,24 @@
     <div class="login-inner">
       <div class="login-logo">StudyLock</div>
       <div class="login-tagline">집중이 습관이 되는 순간</div>
-      <div class="login-form">
-        <input id="login-name-input" class="login-input" type="text" placeholder="이름을 입력하세요" maxlength="6" autocomplete="off" />
-        <button id="login-btn" class="btn-primary">시작하기</button>
+      <div class="login-google-wrap">
+        <!-- Google One Tap 초기화 -->
+        <div id="g_id_onload"
+          data-client_id="YOUR_GOOGLE_CLIENT_ID"
+          data-callback="handleGoogleLogin"
+          data-auto_prompt="false">
+        </div>
+        <!-- Google 공식 로그인 버튼 -->
+        <div class="g_id_signin"
+          data-type="standard"
+          data-size="large"
+          data-theme="outline"
+          data-text="signin_with"
+          data-shape="rectangular"
+          data-logo_alignment="left"
+          data-width="280">
+        </div>
+        <p class="login-notice">Google 계정으로 간편하게 시작하세요</p>
       </div>
     </div>
   </div>
@@ -200,25 +230,30 @@ const App = {
     this.startClock();
     this.bindEvents();
     
-    // 로컬 스토리지 확인
-    const saved = localStorage.getItem('studylock_focus');
+    // Google 로그인 상태 확인 (studylock_auth 키 사용)
+    const saved = localStorage.getItem('studylock_auth');
     if (saved) {
-      const data = JSON.parse(saved);
-      this.state.userName = data.userName;
-      this.state.totalStudySec = data.totalStudySec || 0;
-      this.state.points = data.points || 0;
-      this.login(this.state.userName);
+      try {
+        const data = JSON.parse(saved);
+        const name = data.name || data.userName || '';
+        if (name) {
+          this.state.userName = name;
+          // 공부 기록은 별도 키에서 복원
+          const progress = localStorage.getItem('studylock_focus');
+          if (progress) {
+            const p = JSON.parse(progress);
+            this.state.totalStudySec = p.totalStudySec || 0;
+            this.state.points = p.points || 0;
+          }
+          this.login(this.state.userName);
+          return;
+        }
+      } catch {}
     }
+    // 미로그인 → 로그인 화면 유지
   },
 
   bindEvents() {
-    // 로그인 처리
-    document.getElementById('login-btn').onclick = () => {
-      const name = document.getElementById('login-name-input').value.trim();
-      if (!name) return alert('이름을 입력해주세요.');
-      this.login(name);
-    };
-
     // 하단 탭 네비게이션
     document.querySelectorAll('.nav-item').forEach(btn => {
       btn.onclick = () => {
@@ -233,9 +268,13 @@ const App = {
     document.getElementById('study-btn').onclick = () => this.startStudy();
     document.getElementById('overlay-stop-btn').onclick = () => this.stopStudy();
 
-    // 설정
+    // 로그아웃 — studylock_auth 삭제 후 Google 세션 해제
     document.getElementById('logout-btn').onclick = () => {
+      localStorage.removeItem('studylock_auth');
       localStorage.removeItem('studylock_focus');
+      if (window.google && google.accounts && google.accounts.id) {
+        google.accounts.id.disableAutoSelect();
+      }
       location.reload();
     };
 
@@ -365,6 +404,30 @@ const App = {
 };
 
 document.addEventListener('DOMContentLoaded', () => App.init());
+
+// Google GSI 콜백 — 전역 함수로 등록해야 GSI가 호출 가능
+function handleGoogleLogin(response) {
+  if (!response || !response.credential) return;
+
+  // JWT 디코딩 (서명 검증 없이 — 신뢰는 Google 서버 측에서 완료됨)
+  try {
+    const base64 = response.credential.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(decodeURIComponent(
+      atob(base64).split('').map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
+    ));
+    const user = {
+      name: payload.name || payload.given_name || '사용자',
+      email: payload.email || '',
+      picture: payload.picture || '',
+      googleId: payload.sub || '',
+    };
+    // studylock_auth 키에 저장 → 새로고침 후 자동 로그인에 사용
+    localStorage.setItem('studylock_auth', JSON.stringify(user));
+    App.login(user.name);
+  } catch (e) {
+    console.error('Google 로그인 파싱 실패:', e);
+  }
+}
 </script>
 </body>
 </html>
