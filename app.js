@@ -3,7 +3,7 @@
 // ============================================================
 
 // socket.io 서버 없을 때 폴백
-const socket = (typeof io !== 'undefined') ? io() : { emit: () => { }, on: () => { } };
+const socket = (typeof io !== 'undefined') ? io() : { emit: () => {}, on: () => {} };
 
 // ★ Railway 배포 후 본인 서버 URL로 교체하세요
 const SERVER_URL = 'https://studylock-server.onrender.com';
@@ -69,21 +69,21 @@ const App = {
           points: this.state.points
         })
       });
-    } catch { } // 실패해도 로컬엔 저장됨
+    } catch {} // 실패해도 로컬엔 저장됨
   },
 
   // ── 앱 진입 (로그인 성공 후) ─────────────────────────────
   async _enterApp(user) {
     this.state.userName = user.name || user.userName || '사용자';
-    this.state.email = user.email || '';
-    this.state.picture = user.picture || '';
+    this.state.email    = user.email    || '';
+    this.state.picture  = user.picture  || '';
     this.state.googleId = user.googleId || '';
 
     // 서버 데이터 우선, 없으면 로컬 폴백 — 둘 다 있으면 더 큰 값 사용
-    const local = this._loadLocalProgress();
+    const local  = this._loadLocalProgress();
     const server = await this._fetchServerProgress(this.state.googleId);
     this.state.totalStudySec = Math.max(local.totalStudySec, server?.totalStudySec || 0);
-    this.state.points = Math.max(local.points, server?.points || 0);
+    this.state.points        = Math.max(local.points,        server?.points        || 0);
 
     // 로그인 화면 숨기기
     const ls = document.getElementById('login-screen');
@@ -94,16 +94,16 @@ const App = {
     const name = this.state.userName;
     document.getElementById('greeting-name-display').textContent = `안녕, ${name}`;
 
-    const av = document.getElementById('user-avatar');
+    const av  = document.getElementById('user-avatar');
     const sav = document.getElementById('settings-avatar');
     if (this.state.picture) {
-      av.innerHTML = `<img src="${this.state.picture}" alt="${name}">`;
+      av.innerHTML  = `<img src="${this.state.picture}" alt="${name}">`;
       sav.innerHTML = `<img src="${this.state.picture}" alt="${name}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
     } else {
-      av.textContent = name[0];
+      av.textContent  = name[0];
       sav.textContent = name[0];
     }
-    document.getElementById('settings-name').textContent = name;
+    document.getElementById('settings-name').textContent  = name;
     document.getElementById('settings-email').textContent = this.state.email || '—';
 
     this.updateDashboard();
@@ -122,7 +122,7 @@ const App = {
       };
     });
 
-    document.getElementById('study-btn').onclick = () => this.startStudy();
+    document.getElementById('study-btn').onclick        = () => this.startStudy();
     document.getElementById('overlay-stop-btn').onclick = () => this.stopStudy();
 
     // 데이터 초기화
@@ -147,9 +147,9 @@ const App = {
 
     // 소켓 이벤트
     socket.on('matchComplete', (data) => {
-      this.state.groupId = data.groupId;
+      this.state.groupId   = data.groupId;
       this.state.groupData = data.groupData;
-      this.state.myId = data.myId;
+      this.state.myId      = data.myId;
       this.renderGroupInfo();
     });
     socket.on('groupUpdate', (data) => {
@@ -233,10 +233,10 @@ const App = {
   // ── 대시보드 업데이트 ─────────────────────────────────────
   updateDashboard() {
     const min = Math.floor(this.state.totalStudySec / 60);
-    document.getElementById('study-time-display').textContent = `${min}분`;
-    document.getElementById('total-study-min').textContent = min;
-    document.getElementById('points-display').textContent = this.state.points;
-    document.getElementById('total-points-stat').textContent = this.state.points + ' pt';
+    document.getElementById('study-time-display').textContent  = `${min}분`;
+    document.getElementById('total-study-min').textContent     = min;
+    document.getElementById('points-display').textContent      = this.state.points;
+    document.getElementById('total-points-stat').textContent   = this.state.points + ' pt';
     document.getElementById('study-progress-fill').style.width = Math.min((min / 120) * 100, 100) + '%';
   },
 
@@ -268,15 +268,15 @@ document.addEventListener('DOMContentLoaded', () => App.init());
 function handleGoogleLogin(response) {
   if (!response?.credential) return;
   try {
-    const b64 = response.credential.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const b64  = response.credential.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
     const data = JSON.parse(decodeURIComponent(
       atob(b64).split('').map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
     ));
     const user = {
-      name: data.name || data.given_name || '사용자',
-      email: data.email || '',
-      picture: data.picture || '',
-      googleId: data.sub || ''
+      name:     data.name || data.given_name || '사용자',
+      email:    data.email    || '',
+      picture:  data.picture  || '',
+      googleId: data.sub      || ''
     };
     localStorage.setItem('studylock_auth', JSON.stringify(user));
     App._enterApp(user);
