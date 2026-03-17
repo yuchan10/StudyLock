@@ -1,391 +1,286 @@
 // ============================================================
-// StudyLock - app.js (Minimalist B/W & No Confirm)
+// StudyLock - app.js
 // ============================================================
 
-const Auth = (() => {
-  const AUTH_KEY = 'studylock_auth';
+// socket.io 서버 없을 때 폴백
+const socket = (typeof io !== 'undefined') ? io() : { emit: () => {}, on: () => {} };
 
-  // JWT 페이로드 파싱 (Google credential 디코딩용)
-  function _parseJwt(token) {
-    try {
-      const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-      const json = decodeURIComponent(
-        atob(base64).split('').map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
-      );
-      return JSON.parse(json);
-    } catch { return null; }
-  }
+// ★ Railway 배포 후 본인 서버 URL로 교체하세요
+const SERVER_URL = 'https://YOUR_RAILWAY_URL';
 
-  function getUser() {
-    try {
-      const raw = localStorage.getItem(AUTH_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch { return null; }
-  }
+// ============================================================
+// App
+// ============================================================
+const App = {
+  state: {
+    userName: '', email: '', picture: '', googleId: '',
+    myId: null, groupId: null, groupData: null,
+    totalStudySec: 0, points: 0, sessionSec: 0, timerInterval: null
+  },
 
-  // Google 콜백에서 credential(JWT) 받아 저장
-  function loginWithCredential(credential) {
-    const payload = _parseJwt(credential);
-    if (!payload) return null;
-    const user = {
-      name: payload.name || payload.given_name || '사용자',
-      email: payload.email || '',
-      picture: payload.picture || '',
-      googleId: payload.sub || '',
-    };
-    localStorage.setItem(AUTH_KEY, JSON.stringify(user));
-    return user;
-  }
+  // ── 초기화 ──────────────────────────────────────────────
+  init() {
+    this.startClock();
+    this.bindEvents();
 
-  function logout() {
-    localStorage.removeItem(AUTH_KEY);
-    if (window.google && google.accounts && google.accounts.id) {
-      google.accounts.id.disableAutoSelect();
+    const auth = this._loadAuth();
+    if (auth) {
+      this._enterApp(auth);
     }
-  }
+    // 미로그인이면 login-screen이 그대로 표시됨
+  },
 
-  // googleId 또는 name 둘 다 허용 (하위 호환)
-  function isLoggedIn() {
-    const user = getUser();
-    return !!(user && (user.googleId || (user.name && user.name.length > 0)));
-  }
-
-  return { getUser, loginWithCredential, logout, isLoggedIn };
-})();
-
-const Storage = (() => {
-  const KEY = 'studylock_data';
-
-  function _defaultState(userName) {
-    const name = userName || '지민';
-    const today = _dateKey();
-    return {
-      user: { name: name, avatar: name },
-      goal: 4 * 3600,
-      points: 340,
-      streak: 7,
-      daily: {
-        [today]: {
-          studySec: 0,
-          appLimits: {
-            '게임': { limitSec: 1800, usedSec: 1740, icon: '🎮' },
-            'SNS':  { limitSec: 1800, usedSec: 1023, icon: '💬' },
-            '유튜브':{ limitSec: 1800, usedSec: 600,  icon: '▶' },
-          }
-        }
-      },
-      group: {
-        name: '집중 1조',
-        type: 'Chain',
-        members: [
-          { name: '민준' },
-          { name: '지민', isSelf: true },
-          { name: '수현' },
-        ],
-        controller: '수현',
-      },
-      leaderboard: [
-        { name: '민준', points: 420, studyMin: 180 },
-        { name: '지민', points: 340, studyMin: 132, isSelf: true },
-        { name: '수현', points: 280, studyMin: 95 },
-      ],
-    };
-  }
-
-  function _dateKey() { return new Date().toISOString().slice(0, 10); }
-
-  function load(userName) {
+  // ── 인증 ────────────────────────────────────────────────
+  _loadAuth() {
     try {
-      const raw = localStorage.getItem(KEY);
-      if (!raw) return _defaultState(userName);
-      const data = JSON.parse(raw);
-      if (!data.daily[_dateKey()]) data.daily[_dateKey()] = _defaultState(userName).daily[_dateKey()];
-      // Sync user name from auth
-      if (userName) { data.user.name = userName; data.user.avatar = userName; }
-      return data;
+      const d = JSON.parse(localStorage.getItem('studylock_auth') || 'null');
+      return (d && (d.googleId || d.name)) ? d : null;
+    } catch { return null; }
+  },
+
+  // ── 진행 데이터 (로컬) ──────────────────────────────────
+  _loadLocalProgress() {
+    try {
+      const d = JSON.parse(localStorage.getItem('studylock_progress') || '{}');
+      return { totalStudySec: d.totalStudySec || 0, points: d.points || 0 };
+    } catch { return { totalStudySec: 0, points: 0 }; }
+  },
+
+  // ── 진행 데이터 (서버에서 불러오기) ─────────────────────
+  async _fetchServerProgress(googleId) {
+    try {
+      const res = await fetch(`${SERVER_URL}/api/progress/${googleId}`);
+      if (!res.ok) throw new Error();
+      return await res.json();
     } catch {
-      return _defaultState(userName);
+      return null; // 서버 연결 실패 시 로컬 데이터 사용
     }
-  }
+  },
 
-  function save(state) { localStorage.setItem(KEY, JSON.stringify(state)); }
-  function reset() { localStorage.removeItem(KEY); return _defaultState(); }
+  // ── 진행 데이터 (서버에 저장) ────────────────────────────
+  async _pushServerProgress() {
+    if (!this.state.googleId) return;
+    try {
+      await fetch(`${SERVER_URL}/api/progress/${this.state.googleId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          totalStudySec: this.state.totalStudySec,
+          points: this.state.points
+        })
+      });
+    } catch {} // 실패해도 로컬엔 저장됨
+  },
 
-  return { load, save, reset, dateKey: _dateKey };
-})();
+  // ── 앱 진입 (로그인 성공 후) ─────────────────────────────
+  async _enterApp(user) {
+    this.state.userName = user.name || user.userName || '사용자';
+    this.state.email    = user.email    || '';
+    this.state.picture  = user.picture  || '';
+    this.state.googleId = user.googleId || '';
 
-const Timer = (() => {
-  let _interval = null;
-  let _elapsedSec = 0;
-  let _sessionStart = null;
-  let _onTick = null;
+    // 서버 데이터 우선, 없으면 로컬 폴백 — 둘 다 있으면 더 큰 값 사용
+    const local  = this._loadLocalProgress();
+    const server = await this._fetchServerProgress(this.state.googleId);
+    this.state.totalStudySec = Math.max(local.totalStudySec, server?.totalStudySec || 0);
+    this.state.points        = Math.max(local.points,        server?.points        || 0);
 
-  function start(onTick) {
-    if (_interval) return;
-    _sessionStart = Date.now();
-    _elapsedSec = 0;
-    _onTick = onTick;
-    _interval = setInterval(() => {
-      _elapsedSec = Math.floor((Date.now() - _sessionStart) / 1000);
-      if (_onTick) _onTick(_elapsedSec);
-    }, 1000);
-  }
+    // 로그인 화면 숨기기
+    const ls = document.getElementById('login-screen');
+    ls.classList.add('hide');
+    setTimeout(() => ls.style.display = 'none', 420);
 
-  function stop() {
-    if (!_interval) return 0;
-    clearInterval(_interval);
-    _interval = null;
-    const sec = _elapsedSec;
-    _elapsedSec = 0;
-    return sec;
-  }
+    // UI 업데이트
+    const name = this.state.userName;
+    document.getElementById('greeting-name-display').textContent = `안녕, ${name}`;
 
-  function isRunning() { return _interval !== null; }
-  
-  function fmtOverlay(sec) {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-  }
-  
-  function fmtShort(sec) {
-    const h = Math.floor(sec / 3600);
-    const m = Math.floor((sec % 3600) / 60);
-    if (h > 0) return `${h}시간 ${m}분`;
-    return `${m}분`;
-  }
-
-  return { start, stop, isRunning, fmtOverlay, fmtShort };
-})();
-
-const UI = (() => {
-  const $ = (id) => document.getElementById(id);
-  
-  function renderStudyCard(state, sessionSec = 0) {
-    const today = state.daily[Storage.dateKey()];
-    const totalSec = today.studySec + sessionSec;
-    const pct = Math.min(100, Math.round((totalSec / state.goal) * 100));
-    
-    if ($('study-time-display')) $('study-time-display').textContent = Timer.fmtShort(totalSec);
-    if ($('study-goal-label')) $('study-goal-label').textContent = `목표 ${Timer.fmtShort(state.goal)} · ${pct}%`;
-    if ($('study-progress-fill')) $('study-progress-fill').style.width = pct + '%';
-    if ($('points-display')) $('points-display').textContent = state.points.toLocaleString() + ' pt';
-  }
-
-  function renderGroupRoom(state, sessionSec = 0) {
-    const container = $('participant-grid');
-    if (!container) return;
-
-    container.innerHTML = state.group.members.map(m => {
-      const isMe = m.isSelf;
-      const timeStr = isMe ? Timer.fmtOverlay(sessionSec) : (m.studyMin ? `${m.studyMin}m` : '집중 중');
-      return `
-        <div class="p-card ${isMe ? 'active' : ''}">
-          <div class="p-avatar">👤</div>
-          <div class="p-name">${m.name}${isMe ? ' (나)' : ''}</div>
-          <div class="p-time" style="color: ${isMe ? '#fff' : '#888'}">${timeStr}</div>
-        </div>
-      `;
-    }).join('');
-  }
-
-  function renderLimits(state) {
-    const limits = state.daily[Storage.dateKey()].appLimits;
-    let totalRemain = 0;
-    
-    const html = Object.entries(limits).map(([name, cat]) => {
-      const remain = Math.max(0, cat.limitSec - cat.usedSec);
-      totalRemain += remain;
-      const pct = Math.min(100, (cat.usedSec / cat.limitSec) * 100);
-      
-      return `
-        <div class="list-item">
-          <div style="font-size:0.9rem;">${cat.icon} ${name}</div>
-          <div style="display:flex; align-items:center; gap:10px; width:60%; justify-content:flex-end;">
-            <span style="font-size:0.8rem; color:var(--text-sub);">${Timer.fmtShort(remain)} 남음</span>
-            <div style="width:50px; height:4px; background:#333; border-radius:2px;">
-              <div style="width:${pct}%; height:100%; background:#fff; border-radius:2px;"></div>
-            </div>
-          </div>
-        </div>`;
-    }).join('');
-
-    if ($('limits-list')) $('limits-list').innerHTML = html;
-    if ($('limits-list-stats')) $('limits-list-stats').innerHTML = html;
-    if ($('remain-app-time')) $('remain-app-time').textContent = Timer.fmtShort(totalRemain);
-  }
-
-  function renderLeaderboard(state) {
-    const list = $('leaderboard-list');
-    if (!list) return;
-    const sorted = [...state.leaderboard].sort((a, b) => b.points - a.points);
-    const rank = sorted.findIndex(m => m.isSelf) + 1;
-    if ($('my-rank')) $('my-rank').textContent = `#${rank}`;
-    
-    list.innerHTML = sorted.map((m, i) => `
-      <div class="list-item" style="${m.isSelf ? 'border: 1px solid #fff;' : ''}">
-        <div style="font-size:0.9rem;"><strong>${i+1}</strong>. ${m.name}</div>
-        <div style="font-weight:600;">${m.points} pt</div>
-      </div>
-    `).join('');
-  }
-
-  function renderStats(state) {
-    if ($('total-study-min')) $('total-study-min').textContent = Math.floor(state.daily[Storage.dateKey()].studySec / 60);
-    if ($('streak-big')) $('streak-big').textContent = state.streak + '일';
-    if ($('group-name')) $('group-name').textContent = state.group.name;
-    if ($('group-controller')) $('group-controller').textContent = state.group.controller + ' 리더';
-    if ($('group-avatars')) $('group-avatars').innerHTML = state.group.members.map(m => `<span>👤</span>`).join('');
-  }
-
-  function showTab(tabId) {
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    if ($(tabId + '-panel')) $(tabId + '-panel').classList.add('active');
-    const navBtn = document.querySelector(`[data-tab="${tabId}"]`);
-    if (navBtn) navBtn.classList.add('active');
-  }
-
-  return { 
-    renderStudyCard, renderGroupRoom, renderLimits, 
-    renderLeaderboard, renderStats, showTab, $ 
-  };
-})();
-
-const App = (() => {
-  let state = null;
-
-  function init() {
-    // 로그인 체크
-    if (!Auth.isLoggedIn()) {
-      _showLoginScreen();
-      _bindLoginEvents();
-      return;
+    const av  = document.getElementById('user-avatar');
+    const sav = document.getElementById('settings-avatar');
+    if (this.state.picture) {
+      av.innerHTML  = `<img src="${this.state.picture}" alt="${name}">`;
+      sav.innerHTML = `<img src="${this.state.picture}" alt="${name}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+    } else {
+      av.textContent  = name[0];
+      sav.textContent = name[0];
     }
-    _launchApp();
-  }
+    document.getElementById('settings-name').textContent  = name;
+    document.getElementById('settings-email').textContent = this.state.email || '—';
 
-  function _showLoginScreen() {
-    const screen = UI.$('login-screen');
-    if (screen) screen.classList.remove('hidden');
-  }
+    this.updateDashboard();
+    socket.emit('joinMatch', { name });
+  },
 
-  function _hideLoginScreen() {
-    const screen = UI.$('login-screen');
-    if (screen) screen.classList.add('hidden');
-  }
+  // ── 이벤트 바인딩 ────────────────────────────────────────
+  bindEvents() {
+    // 탭 전환
+    document.querySelectorAll('.nav-item').forEach(btn => {
+      btn.onclick = () => {
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        document.getElementById(btn.dataset.tab + '-panel').classList.add('active');
+        btn.classList.add('active');
+      };
+    });
 
-  function _bindLoginEvents() {
-    // Google GSI가 호출하는 전역 콜백
-    window.handleGoogleLogin = function(response) {
-      if (!response || !response.credential) return;
-      const user = Auth.loginWithCredential(response.credential);
-      if (!user) return;
-      _hideLoginScreen();
-      _launchApp();
+    document.getElementById('study-btn').onclick        = () => this.startStudy();
+    document.getElementById('overlay-stop-btn').onclick = () => this.stopStudy();
+
+    // 데이터 초기화
+    document.getElementById('reset-btn').onclick = () => {
+      localStorage.removeItem('studylock_progress');
+      this.state.totalStudySec = 0;
+      this.state.points = 0;
+      this.updateDashboard();
     };
-  }
 
-  function _launchApp() {
-    const authUser = Auth.getUser();
-    const userName = authUser ? authUser.name : null;
-    state = Storage.load(userName);
+    // 로그아웃 — 타이머 중이면 먼저 저장
+    document.getElementById('logout-btn').onclick = () => {
+      if (this.state.timerInterval) {
+        clearInterval(this.state.timerInterval);
+        this.state.points += Math.floor(this.state.sessionSec / 60) * 10;
+      }
+      this.saveProgress();
+      localStorage.removeItem('studylock_auth');
+      if (window.google?.accounts?.id) google.accounts.id.disableAutoSelect();
+      location.reload();
+    };
 
-    // 인사 텍스트 동기화
-    const greetingName = document.querySelector('.greeting-name');
-    if (greetingName) greetingName.textContent = `안녕, ${state.user.name}`;
-    const userAvatar = UI.$('user-avatar');
-    if (userAvatar) userAvatar.textContent = state.user.name.slice(0, 2);
+    // 소켓 이벤트
+    socket.on('matchComplete', (data) => {
+      this.state.groupId   = data.groupId;
+      this.state.groupData = data.groupData;
+      this.state.myId      = data.myId;
+      this.renderGroupInfo();
+    });
+    socket.on('groupUpdate', (data) => {
+      this.state.groupData = data;
+      this.renderGroupInfo();
+    });
+  },
 
-    renderAll();
-    _bindEvents();
+  // ── 그룹 정보 렌더링 ─────────────────────────────────────
+  renderGroupInfo() {
+    const { groupData, myId } = this.state;
+    if (!groupData) return;
 
-    setInterval(() => {
-      const now = new Date();
-      const clock = UI.$('clock');
-      if (clock) clock.textContent = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    document.getElementById('group-name').textContent = groupData.name;
+    const admin = groupData.members.find(m => m.id === groupData.adminId);
+    document.getElementById('group-controller').textContent =
+      `관리자: ${admin?.id === myId ? '본인' : admin?.name}`;
+
+    const sorted = [...groupData.members].sort((a, b) => b.studySec - a.studySec);
+    document.getElementById('my-rank').textContent = `#${sorted.findIndex(m => m.id === myId) + 1}위`;
+
+    document.getElementById('leaderboard-list').innerHTML = sorted.map((m, i) => `
+      <div style="display:flex;justify-content:space-between;align-items:center;
+                  padding:15px;background:var(--surface);
+                  border:1px solid ${m.id === myId ? '#fff' : '#222'};
+                  border-radius:12px;margin-bottom:8px;">
+        <span style="font-weight:${m.id === myId ? 700 : 400};color:${m.id === myId ? '#fff' : '#aaa'}">
+          ${i + 1}. ${m.name}${m.id === myId ? ' (나)' : ''}
+        </span>
+        <span style="font-size:0.82rem;color:${m.status === 'studying' ? '#fff' : '#444'}">
+          ${m.status === 'studying' ? '● 집중 중' : Math.floor(m.studySec / 60) + '분'}
+        </span>
+      </div>`).join('');
+  },
+
+  // ── 공부 시작 ────────────────────────────────────────────
+  startStudy() {
+    document.getElementById('timer-overlay').style.display = 'flex';
+    this.state.sessionSec = 0;
+    const grid = document.getElementById('participant-grid');
+
+    if (this.state.groupId) {
+      socket.emit('startStudy', this.state.groupId);
+      grid.innerHTML = this.state.groupData.members.map(m => `
+        <div class="p-card ${m.id === this.state.myId ? 'active' : ''}">
+          <div class="p-avatar">👤</div>
+          <div class="p-name">${m.name}</div>
+        </div>`).join('');
+    } else {
+      // 솔로 모드
+      grid.innerHTML = `
+        <div class="p-card active" style="grid-column:1/-1;max-width:130px;margin:0 auto;">
+          <div class="p-avatar">👤</div>
+          <div class="p-name">${this.state.userName}</div>
+          <div style="font-size:0.65rem;color:#444;margin-top:4px;">솔로 집중</div>
+        </div>`;
+    }
+
+    this.state.timerInterval = setInterval(() => {
+      this.state.sessionSec++;
+      this.state.totalStudySec++;
+      const m = Math.floor(this.state.sessionSec / 60);
+      const s = this.state.sessionSec % 60;
+      document.getElementById('session-elapsed').textContent =
+        `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      // 10초마다 자동 저장
+      if (this.state.sessionSec % 10 === 0) this.saveProgress();
     }, 1000);
+  },
+
+  // ── 공부 종료 ────────────────────────────────────────────
+  stopStudy() {
+    clearInterval(this.state.timerInterval);
+    document.getElementById('timer-overlay').style.display = 'none';
+    this.state.points += Math.floor(this.state.sessionSec / 60) * 10;
+    socket.emit('stopStudy', { groupId: this.state.groupId, sessionSec: this.state.sessionSec });
+    this.saveProgress();
+    this.updateDashboard();
+  },
+
+  // ── 대시보드 업데이트 ─────────────────────────────────────
+  updateDashboard() {
+    const min = Math.floor(this.state.totalStudySec / 60);
+    document.getElementById('study-time-display').textContent  = `${min}분`;
+    document.getElementById('total-study-min').textContent     = min;
+    document.getElementById('points-display').textContent      = this.state.points;
+    document.getElementById('total-points-stat').textContent   = this.state.points + ' pt';
+    document.getElementById('study-progress-fill').style.width = Math.min((min / 120) * 100, 100) + '%';
+  },
+
+  // ── 데이터 저장 (로컬 + 서버) ────────────────────────────
+  saveProgress() {
+    localStorage.setItem('studylock_progress', JSON.stringify({
+      totalStudySec: this.state.totalStudySec,
+      points: this.state.points
+    }));
+    this._pushServerProgress(); // 비동기, 실패해도 로컬엔 저장됨
+  },
+
+  // ── 시계 ────────────────────────────────────────────────
+  startClock() {
+    const tick = () => {
+      const n = new Date();
+      document.getElementById('clock').textContent =
+        String(n.getHours()).padStart(2, '0') + ':' + String(n.getMinutes()).padStart(2, '0');
+    };
+    tick();
+    setInterval(tick, 1000);
   }
+};
 
-  function renderAll(sessionSec = 0) {
-    UI.renderStudyCard(state, sessionSec);
-    UI.renderGroupRoom(state, sessionSec);
-    UI.renderLimits(state);
-    UI.renderLeaderboard(state);
-    UI.renderStats(state);
-  }
-
-  function _bindEvents() {
-    const studyBtn = UI.$('study-btn');
-    if (studyBtn) studyBtn.addEventListener('click', _startStudy);
-
-    const stopBtn = UI.$('overlay-stop-btn');
-    if (stopBtn) stopBtn.addEventListener('click', _stopStudy); // [수정] confirm 창 없이 바로 정지
-
-    document.querySelectorAll('[data-tab]').forEach(el => {
-      el.addEventListener('click', () => UI.showTab(el.dataset.tab));
-    });
-
-    const resetBtn = UI.$('reset-btn');
-    if (resetBtn) {
-      resetBtn.addEventListener('click', () => {
-        Storage.reset();
-        state = Storage.load(Auth.getUser()?.name);
-        renderAll();
-      });
-    }
-
-    const logoutBtn = UI.$('logout-btn');
-    if (logoutBtn) {
-      logoutBtn.addEventListener('click', () => {
-        Timer.stop();
-        const overlay = UI.$('timer-overlay');
-        if (overlay) overlay.style.display = 'none';
-        Auth.logout();
-        _showLoginScreen();
-        _bindLoginEvents();
-        // GSI 버튼 재렌더링
-        if (window.google && google.accounts && google.accounts.id) {
-          google.accounts.id.renderButton(
-            document.querySelector('.g_id_signin'),
-            { type: 'standard', size: 'large', theme: 'outline', text: 'signin_with', shape: 'rectangular', logo_alignment: 'left', width: 280 }
-          );
-        }
-      });
-    }
-  }
-
-  function _startStudy() {
-    const overlay = UI.$('timer-overlay');
-    if (overlay) overlay.style.display = 'flex';
-
-    Timer.start((sec) => {
-      const el = UI.$('session-elapsed');
-      if (el) el.textContent = Timer.fmtOverlay(sec);
-      UI.renderStudyCard(state, sec);
-      UI.renderGroupRoom(state, sec);
-    });
-  }
-
-  function _stopStudy() {
-    const sec = Timer.stop();
-    const overlay = UI.$('timer-overlay');
-    if (overlay) overlay.style.display = 'none';
-
-    // 공부한 시간 저장
-    const today = state.daily[Storage.dateKey()];
-    today.studySec += sec;
-    
-    // 1분당 2포인트 적립 로직
-    if (sec >= 60) {
-      state.points += Math.floor(sec / 60) * 2;
-    }
-    
-    Storage.save(state);
-    renderAll();
-  }
-
-  return { init };
-})();
-
+// ── 앱 시작 ──────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => App.init());
+
+// ── Google GSI 콜백 (전역 함수로 등록 필수) ──────────────
+function handleGoogleLogin(response) {
+  if (!response?.credential) return;
+  try {
+    const b64  = response.credential.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const data = JSON.parse(decodeURIComponent(
+      atob(b64).split('').map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
+    ));
+    const user = {
+      name:     data.name || data.given_name || '사용자',
+      email:    data.email    || '',
+      picture:  data.picture  || '',
+      googleId: data.sub      || ''
+    };
+    localStorage.setItem('studylock_auth', JSON.stringify(user));
+    App._enterApp(user);
+  } catch (e) {
+    console.error('Google 로그인 오류:', e);
+  }
+}
