@@ -115,6 +115,10 @@
           data-width="280">
         </div>
         <p class="login-notice">Google 계정으로 간편하게 시작하세요</p>
+        <!-- 클라이언트 ID 미설정 시 안내 (개발 환경) -->
+        <p id="gsi-warning" class="login-notice" style="color:#555; display:none;">
+          ⚠️ index.html에서 <code style="color:#888">YOUR_GOOGLE_CLIENT_ID</code>를<br>실제 클라이언트 ID로 교체해주세요.
+        </p>
       </div>
     </div>
   </div>
@@ -212,7 +216,11 @@
 </div>
 
 <script>
-const socket = io();
+// socket.io 서버가 실행 중이 아닐 때 에러 방지용 안전한 폴백
+const socket = (typeof io !== 'undefined') ? io() : {
+  emit: () => {},
+  on: () => {}
+};
 
 const App = {
   state: {
@@ -339,20 +347,29 @@ const App = {
   },
 
   startStudy() {
-    if (!this.state.groupId) return alert('그룹 매칭이 완료될 때까지 잠시 기다려주세요!');
-    
     document.getElementById('timer-overlay').style.display = 'flex';
     this.state.sessionSec = 0;
-    socket.emit('startStudy', this.state.groupId);
 
-    // 오버레이 참가자 현황 렌더링
-    const grid = document.getElementById('participant-grid');
-    grid.innerHTML = this.state.groupData.members.map(m => `
-      <div class="p-card ${m.id === this.state.myId ? 'active' : ''}">
-        <div class="p-avatar">👤</div>
-        <div class="p-name">${m.name}</div>
-      </div>
-    `).join('');
+    // 그룹 매칭된 경우만 socket 이벤트 전송
+    if (this.state.groupId) {
+      socket.emit('startStudy', this.state.groupId);
+      const grid = document.getElementById('participant-grid');
+      grid.innerHTML = this.state.groupData.members.map(m => `
+        <div class="p-card ${m.id === this.state.myId ? 'active' : ''}">
+          <div class="p-avatar">👤</div>
+          <div class="p-name">${m.name}</div>
+        </div>
+      `).join('');
+    } else {
+      // 솔로 모드: 본인 카드만 표시
+      const grid = document.getElementById('participant-grid');
+      grid.innerHTML = `
+        <div class="p-card active" style="grid-column: 1 / -1; max-width: 140px; margin: 0 auto;">
+          <div class="p-avatar">👤</div>
+          <div class="p-name">${this.state.userName}</div>
+          <div style="font-size:0.7rem; color:#555; margin-top:4px;">혼자 집중 중</div>
+        </div>`;
+    }
 
     this.state.timerInterval = setInterval(() => {
       this.state.sessionSec++;
@@ -403,7 +420,14 @@ const App = {
   }
 };
 
-document.addEventListener('DOMContentLoaded', () => App.init());
+document.addEventListener('DOMContentLoaded', () => {
+  App.init();
+  // 클라이언트 ID 플레이스홀더 체크
+  const onload = document.getElementById('g_id_onload');
+  if (onload && onload.dataset.client_id === 'YOUR_GOOGLE_CLIENT_ID') {
+    document.getElementById('gsi-warning').style.display = 'block';
+  }
+});
 
 // Google GSI 콜백 — 전역 함수로 등록해야 GSI가 호출 가능
 function handleGoogleLogin(response) {
