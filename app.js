@@ -4,16 +4,16 @@
 
 const SERVER_URL = window.STUDYLOCK_SERVER_URL || 'https://studylock-server.onrender.com';
 
-// ── [보안] 소켓 연결 시 세션 토큰을 auth로 전달 ─────────
+// ── 소켓 연결 시 세션 토큰을 auth로 전달 ─────────────────
 function createSocket(sessionToken) {
-  if (typeof io === 'undefined') return { emit: () => {}, on: () => {}, once: () => {}, connect: () => {} };
+  if (typeof io === 'undefined') return { emit: () => {}, on: () => {}, connect: () => {} };
   return io(SERVER_URL, {
     auth: { token: sessionToken },
     autoConnect: false
   });
 }
 
-let socket = { emit: () => {}, on: () => {}, once: () => {}, connect: () => {} };
+let socket = { emit: () => {}, on: () => {}, connect: () => {} };
 
 // ============================================================
 // App
@@ -23,8 +23,9 @@ const App = {
     userName: '', email: '', picture: '', googleId: '',
     myId: null, groupId: null, groupData: null,
     totalStudySec: 0, points: 0,
-    sessionSec: 0,        // UI 표시용 (클라이언트 카운트)
-    timerInterval: null
+    sessionSec: 0,      // UI 표시용 (클라이언트 카운트)
+    timerInterval: null,
+    studying: false     // [수정 #3] 중복 세션 방지용 플래그
   },
 
   // ── 초기화 ──────────────────────────────────────────────
@@ -32,38 +33,62 @@ const App = {
     this.startClock();
     this.bindEvents();
 
-    // [수정] Google Client ID를 서버에서 동적으로 가져와 GSI 초기화
+    // [수정 #1] GSI 타이밍 레이스 해결: 스크립트 로드 완료까지 대기 후 초기화
     await this._initGoogleSignIn();
 
     const auth = this._loadAuth();
     if (auth) this._enterApp(auth);
   },
 
-  // ── [수정] Google Client ID 동적 주입 ───────────────────
+  // ── [수정 #1 & #6] Google Client ID 동적 주입 + GSI 로드 대기 + 실패 시 안내 ──
   async _initGoogleSignIn() {
+    // GSI 스크립트 로드 완료 대기 (최대 5초)
+    await new Promise(resolve => {
+      if (window.google?.accounts?.id) return resolve();
+      const limit = Date.now() + 5000;
+      const poll = setInterval(() => {
+        if (window.google?.accounts?.id || Date.now() > limit) {
+          clearInterval(poll);
+          resolve();
+        }
+      }, 50);
+    });
+
+    let googleClientId = '';
     try {
       const res = await fetch(`${SERVER_URL}/api/config`);
-      if (!res.ok) return;
-      const { googleClientId } = await res.json();
-      if (!googleClientId) return;
-
-      const onload = document.getElementById('g_id_onload');
-      if (onload) onload.setAttribute('data-client_id', googleClientId);
-
-      // GSI가 이미 로드된 경우 재초기화
-      if (window.google?.accounts?.id) {
-        google.accounts.id.initialize({
-          client_id: googleClientId,
-          callback: handleGoogleLogin,
-          auto_select: false
-        });
-        google.accounts.id.renderButton(
-          document.querySelector('.g_id_signin'),
-          { type: 'standard', size: 'large', theme: 'outline', text: 'signin_with', shape: 'rectangular', logo_alignment: 'left', width: 280 }
-        );
+      if (res.ok) {
+        const data = await res.json();
+        googleClientId = data.googleClientId || '';
       }
     } catch (e) {
-      console.warn('Google Sign-In 초기화 실패:', e.message);
+      console.warn('서버 설정 로드 실패:', e.message);
+    }
+
+    // [수정 #6] 서버 응답 실패 시 기존 data-client_id 폴백 사용
+    const onload = document.getElementById('g_id_onload');
+    const existingId = onload?.getAttribute('data-client_id') || '';
+    const clientId = googleClientId || existingId;
+
+    if (!clientId) {
+      // Client ID 없으면 안내 메시지로 교체 (빈 화면 방지)
+      const wrap = document.querySelector('.login-google-wrap');
+      if (wrap) wrap.innerHTML = '<p style="color:#666;font-size:0.85rem;text-align:center;line-height:1.8;">서버에 연결할 수 없습니다.<br>잠시 후 다시 시도해 주세요.</p>';
+      return;
+    }
+
+    if (onload) onload.setAttribute('data-client_id', clientId);
+
+    if (window.google?.accounts?.id) {
+      google.accounts.id.initialize({
+        client_id: clientId,
+        callback: handleGoogleLogin,
+        auto_select: false
+      });
+      google.accounts.id.renderButton(
+        document.querySelector('.g_id_signin'),
+        { type: 'standard', size: 'large', theme: 'outline', text: 'signin_with', shape: 'rectangular', logo_alignment: 'left', width: 280 }
+      );
     }
   },
 
@@ -182,16 +207,29 @@ const App = {
     document.getElementById('study-btn').onclick        = () => this.startStudy();
     document.getElementById('overlay-stop-btn').onclick = () => this.stopStudy();
 
+    // [수정 #4] 데이터 초기화: 확인 다이얼로그 추가 (실수 방지)
     document.getElementById('reset-btn').onclick = () => {
+      if (!confirm('공부 기록과 포인트를 모두 초기화할까요?')) return;
       this.state.totalStudySec = 0;
       this.state.points = 0;
       this._pushServerProgress();
       this.updateDashboard();
     };
 
-    document.getElementById('logout-btn').onclick = () => {
-      if (this.state.timerInterval) {
+    // [수정 #5] 로그아웃 시 공부 중이면 서버에 종료 알림 후 로그아웃
+    document.getElementById('logout-btn').onclick = async () => {
+      if (this.state.studying) {
+        if (this.state.groupId) {
+          socket.emit('stopStudy', { groupId: this.state.groupId });
+        } else {
+          socket.emit('stopStudySolo');
+        }
         clearInterval(this.state.timerInterval);
+        this.state.timerInterval = null;
+        this.state.studying = false;
+        document.getElementById('timer-overlay').style.display = 'none';
+        // 서버가 sessionResult 보낼 시간 잠깐 대기
+        await new Promise(r => setTimeout(r, 400));
       }
       this._pushServerProgress();
       localStorage.removeItem('studylock_auth');
@@ -200,7 +238,7 @@ const App = {
     };
   },
 
-  // ── 소켓 이벤트 바인딩 ───────────────────────────────────
+  // ── [수정 #3] 소켓 이벤트 바인딩: sessionResult 중복 방지 ──
   _bindSocketEvents() {
     socket.on('matchComplete', (data) => {
       this.state.groupId   = data.groupId;
@@ -208,17 +246,22 @@ const App = {
       this.state.myId      = data.myId;
       this.renderGroupInfo();
     });
+
     socket.on('groupUpdate', (data) => {
       this.state.groupData = data;
       this.renderGroupInfo();
     });
-    // [수정] 서버에서 계산한 sessionSec 수신 (그룹 & 솔로 공통)
+
+    // [수정 #3] studying 플래그로 중복 처리 방지 (소켓 재연결 시 이중 합산 차단)
     socket.on('sessionResult', ({ sessionSec }) => {
+      if (!this.state.studying) return; // 이미 처리됐거나 공부 중 아님 → 무시
+      this.state.studying = false;
       this.state.totalStudySec += sessionSec;
       this.state.points += Math.floor(sessionSec / 60) * 10;
       this._pushServerProgress();
       this.updateDashboard();
     });
+
     socket.on('connect_error', (err) => {
       console.warn('소켓 연결 실패:', err.message);
     });
@@ -250,12 +293,12 @@ const App = {
 
   // ── 공부 시작 ────────────────────────────────────────────
   startStudy() {
+    this.state.studying = true;
     document.getElementById('timer-overlay').style.display = 'flex';
     this.state.sessionSec = 0;
     const grid = document.getElementById('participant-grid');
 
     if (this.state.groupId) {
-      // 그룹 모드
       socket.emit('startStudy', this.state.groupId);
       grid.innerHTML = this.state.groupData.members.map(m => `
         <div class="p-card ${m.id === this.state.myId ? 'active' : ''}">
@@ -263,7 +306,6 @@ const App = {
           <div class="p-name">${escapeHtml(m.name)}</div>
         </div>`).join('');
     } else {
-      // [수정] 솔로 모드: 서버에 시작 이벤트 전송
       socket.emit('startStudySolo');
       grid.innerHTML = `
         <div class="p-card active" style="grid-column:1/-1;max-width:130px;margin:0 auto;">
@@ -289,11 +331,20 @@ const App = {
     this.state.timerInterval = null;
     document.getElementById('timer-overlay').style.display = 'none';
 
+    // [수정 #2] 소켓 미연결 시: 클라이언트 타이머 값으로 직접 반영 (폴백)
+    if (typeof socket.connected !== 'undefined' && !socket.connected) {
+      console.warn('소켓 미연결: 클라이언트 측정 시간으로 대체합니다.');
+      this.state.studying = false;
+      this.state.totalStudySec += this.state.sessionSec;
+      this.state.points += Math.floor(this.state.sessionSec / 60) * 10;
+      this._pushServerProgress();
+      this.updateDashboard();
+      return;
+    }
+
     if (this.state.groupId) {
-      // 그룹 모드: stopStudy → 서버가 sessionResult 전송
       socket.emit('stopStudy', { groupId: this.state.groupId });
     } else {
-      // [수정] 솔로 모드: stopStudySolo → 서버가 sessionResult 전송
       socket.emit('stopStudySolo');
     }
     // 결과는 _bindSocketEvents의 'sessionResult' 리스너에서 처리
@@ -309,11 +360,6 @@ const App = {
     document.getElementById('study-progress-fill').style.width = Math.min((min / 120) * 100, 100) + '%';
   },
 
-  // ── 데이터 저장 ──────────────────────────────────────────
-  saveProgress() {
-    this._pushServerProgress();
-  },
-
   // ── 시계 ─────────────────────────────────────────────────
   startClock() {
     const tick = () => {
@@ -324,6 +370,7 @@ const App = {
     tick();
     setInterval(tick, 1000);
   }
+  // [수정 #7] saveProgress() dead code 제거됨
 };
 
 // ── [보안] XSS 방지용 HTML 이스케이프 ────────────────────
@@ -350,7 +397,7 @@ async function handleGoogleLogin(response) {
     });
 
     if (!res.ok) {
-      const err = await res.json();
+      const err = await res.json().catch(() => ({}));
       console.error('로그인 실패:', err.error);
       alert('로그인에 실패했습니다. 다시 시도해 주세요.');
       return;
