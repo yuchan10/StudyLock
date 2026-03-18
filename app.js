@@ -110,10 +110,9 @@ const App = {
     this.state.picture  = user.picture  || '';
     this.state.googleId = user.googleId || '';
 
-    const local  = this._loadLocalProgress();
     const server = await this._fetchServerProgress(this.state.googleId);
-    this.state.totalStudySec = Math.max(local.totalStudySec, server?.totalStudySec || 0);
-    this.state.points        = Math.max(local.points,        server?.points        || 0);
+    this.state.totalStudySec = server?.totalStudySec || 0;
+    this.state.points = server?.points || 0;
 
     // 소켓 연결 (세션 토큰 포함)
     const sessionToken = this._getSessionToken();
@@ -276,10 +275,6 @@ const App = {
 
   // ── 데이터 저장 ──────────────────────────────────────────
   saveProgress() {
-    localStorage.setItem('studylock_progress', JSON.stringify({
-      totalStudySec: this.state.totalStudySec,
-      points: this.state.points
-    }));
     this._pushServerProgress();
   },
 
