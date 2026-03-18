@@ -1,5 +1,12 @@
-// 로컬 개발 환경에서만 .env 로드 (Render 등 배포 환경은 자체 환경변수 사용)
-if (process.env.NODE_ENV !== 'production') require('dotenv').config();
+require('dotenv').config({ path: '.env' });
+
+// [임시 디버그] 환경변수 확인 후 제거 예정
+console.log('ENV CHECK:', {
+  HAS_SECRET: !!process.env.SESSION_SECRET,
+  HAS_CLIENT_ID: !!process.env.GOOGLE_CLIENT_ID,
+  NODE_ENV: process.env.NODE_ENV,
+  KEYS: Object.keys(process.env).filter(k => !k.includes('npm') && !k.includes('PATH')).join(', ')
+});
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
