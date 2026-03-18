@@ -1,20 +1,19 @@
 // ============================================================
-// StudyLock - app.js (보안 수정본)
+// StudyLock - app.js
 // ============================================================
 
-// ★ 배포 후 본인 서버 URL로 교체하세요 (환경변수 방식 권장)
 const SERVER_URL = window.STUDYLOCK_SERVER_URL || 'https://studylock-server.onrender.com';
 
 // ── [보안] 소켓 연결 시 세션 토큰을 auth로 전달 ─────────
 function createSocket(sessionToken) {
-  if (typeof io === 'undefined') return { emit: () => {}, on: () => {} };
+  if (typeof io === 'undefined') return { emit: () => {}, on: () => {}, once: () => {}, connect: () => {} };
   return io(SERVER_URL, {
     auth: { token: sessionToken },
     autoConnect: false
   });
 }
 
-let socket = { emit: () => {}, on: () => {} };
+let socket = { emit: () => {}, on: () => {}, once: () => {}, connect: () => {} };
 
 // ============================================================
 // App
@@ -23,36 +22,61 @@ const App = {
   state: {
     userName: '', email: '', picture: '', googleId: '',
     myId: null, groupId: null, groupData: null,
-    totalStudySec: 0, points: 0, sessionSec: 0, timerInterval: null
+    totalStudySec: 0, points: 0,
+    sessionSec: 0,        // UI 표시용 (클라이언트 카운트)
+    timerInterval: null
   },
 
   // ── 초기화 ──────────────────────────────────────────────
-  init() {
+  async init() {
     this.startClock();
     this.bindEvents();
+
+    // [수정] Google Client ID를 서버에서 동적으로 가져와 GSI 초기화
+    await this._initGoogleSignIn();
+
     const auth = this._loadAuth();
     if (auth) this._enterApp(auth);
+  },
+
+  // ── [수정] Google Client ID 동적 주입 ───────────────────
+  async _initGoogleSignIn() {
+    try {
+      const res = await fetch(`${SERVER_URL}/api/config`);
+      if (!res.ok) return;
+      const { googleClientId } = await res.json();
+      if (!googleClientId) return;
+
+      const onload = document.getElementById('g_id_onload');
+      if (onload) onload.setAttribute('data-client_id', googleClientId);
+
+      // GSI가 이미 로드된 경우 재초기화
+      if (window.google?.accounts?.id) {
+        google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: handleGoogleLogin,
+          auto_select: false
+        });
+        google.accounts.id.renderButton(
+          document.querySelector('.g_id_signin'),
+          { type: 'standard', size: 'large', theme: 'outline', text: 'signin_with', shape: 'rectangular', logo_alignment: 'left', width: 280 }
+        );
+      }
+    } catch (e) {
+      console.warn('Google Sign-In 초기화 실패:', e.message);
+    }
   },
 
   // ── [보안] localStorage에는 서버 발급 sessionToken만 저장 ──
   _loadAuth() {
     try {
       const d = JSON.parse(localStorage.getItem('studylock_auth') || 'null');
-      // credential(Google 원본 토큰) 이 남아있으면 제거
       if (d?.credential) {
         delete d.credential;
         localStorage.setItem('studylock_auth', JSON.stringify(d));
       }
       return (d && d.googleId && d.sessionToken) ? d : null;
     } catch { return null; }
-  },
-
-  // ── 진행 데이터 (로컬) ──────────────────────────────────
-  _loadLocalProgress() {
-    try {
-      const d = JSON.parse(localStorage.getItem('studylock_progress') || '{}');
-      return { totalStudySec: d.totalStudySec || 0, points: d.points || 0 };
-    } catch { return { totalStudySec: 0, points: 0 }; }
   },
 
   // ── 진행 데이터 (서버) ───────────────────────────────────
@@ -98,7 +122,6 @@ const App = {
   // ── [보안] 세션 만료 시 강제 로그아웃 ───────────────────
   _forceLogout() {
     localStorage.removeItem('studylock_auth');
-    localStorage.removeItem('studylock_progress');
     alert('세션이 만료되었습니다. 다시 로그인해 주세요.');
     location.reload();
   },
@@ -114,7 +137,7 @@ const App = {
     this.state.totalStudySec = server?.totalStudySec || 0;
     this.state.points = server?.points || 0;
 
-    // 소켓 연결 (세션 토큰 포함)
+    // 소켓 연결
     const sessionToken = this._getSessionToken();
     if (sessionToken && typeof io !== 'undefined') {
       socket = createSocket(sessionToken);
@@ -122,7 +145,6 @@ const App = {
       socket.connect();
     }
 
-    // 로그인 화면 숨기기
     const ls = document.getElementById('login-screen');
     ls.classList.add('hide');
     setTimeout(() => ls.style.display = 'none', 420);
@@ -133,8 +155,8 @@ const App = {
     const av  = document.getElementById('user-avatar');
     const sav = document.getElementById('settings-avatar');
     if (this.state.picture) {
-      av.innerHTML  = `<img src="${this.state.picture}" alt="">`;
-      sav.innerHTML = `<img src="${this.state.picture}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+      av.innerHTML  = `<img src="${escapeHtml(this.state.picture)}" alt="">`;
+      sav.innerHTML = `<img src="${escapeHtml(this.state.picture)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
     } else {
       av.textContent  = name[0];
       sav.textContent = name[0];
@@ -161,18 +183,17 @@ const App = {
     document.getElementById('overlay-stop-btn').onclick = () => this.stopStudy();
 
     document.getElementById('reset-btn').onclick = () => {
-      localStorage.removeItem('studylock_progress');
       this.state.totalStudySec = 0;
       this.state.points = 0;
+      this._pushServerProgress();
       this.updateDashboard();
     };
 
     document.getElementById('logout-btn').onclick = () => {
       if (this.state.timerInterval) {
         clearInterval(this.state.timerInterval);
-        this.state.points += Math.floor(this.state.sessionSec / 60) * 10;
       }
-      this.saveProgress();
+      this._pushServerProgress();
       localStorage.removeItem('studylock_auth');
       if (window.google?.accounts?.id) google.accounts.id.disableAutoSelect();
       location.reload();
@@ -191,6 +212,13 @@ const App = {
       this.state.groupData = data;
       this.renderGroupInfo();
     });
+    // [수정] 서버에서 계산한 sessionSec 수신 (그룹 & 솔로 공통)
+    socket.on('sessionResult', ({ sessionSec }) => {
+      this.state.totalStudySec += sessionSec;
+      this.state.points += Math.floor(sessionSec / 60) * 10;
+      this._pushServerProgress();
+      this.updateDashboard();
+    });
     socket.on('connect_error', (err) => {
       console.warn('소켓 연결 실패:', err.message);
     });
@@ -203,7 +231,7 @@ const App = {
     document.getElementById('group-name').textContent = groupData.name;
     const admin = groupData.members.find(m => m.id === groupData.adminId);
     document.getElementById('group-controller').textContent =
-      `관리자: ${admin?.id === myId ? '본인' : admin?.name}`;
+      `관리자: ${admin?.id === myId ? '본인' : escapeHtml(admin?.name || '—')}`;
     const sorted = [...groupData.members].sort((a, b) => b.studySec - a.studySec);
     document.getElementById('my-rank').textContent = `#${sorted.findIndex(m => m.id === myId) + 1}위`;
     document.getElementById('leaderboard-list').innerHTML = sorted.map((m, i) => `
@@ -227,6 +255,7 @@ const App = {
     const grid = document.getElementById('participant-grid');
 
     if (this.state.groupId) {
+      // 그룹 모드
       socket.emit('startStudy', this.state.groupId);
       grid.innerHTML = this.state.groupData.members.map(m => `
         <div class="p-card ${m.id === this.state.myId ? 'active' : ''}">
@@ -234,6 +263,8 @@ const App = {
           <div class="p-name">${escapeHtml(m.name)}</div>
         </div>`).join('');
     } else {
+      // [수정] 솔로 모드: 서버에 시작 이벤트 전송
+      socket.emit('startStudySolo');
       grid.innerHTML = `
         <div class="p-card active" style="grid-column:1/-1;max-width:130px;margin:0 auto;">
           <div class="p-avatar">👤</div>
@@ -242,29 +273,30 @@ const App = {
         </div>`;
     }
 
+    // UI 표시용 클라이언트 타이머 (실제 포인트 계산은 서버)
     this.state.timerInterval = setInterval(() => {
       this.state.sessionSec++;
-      this.state.totalStudySec++;
       const m = Math.floor(this.state.sessionSec / 60);
       const s = this.state.sessionSec % 60;
       document.getElementById('session-elapsed').textContent =
         `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-      if (this.state.sessionSec % 10 === 0) this.saveProgress();
     }, 1000);
   },
 
   // ── 공부 종료 ────────────────────────────────────────────
   stopStudy() {
     clearInterval(this.state.timerInterval);
+    this.state.timerInterval = null;
     document.getElementById('timer-overlay').style.display = 'none';
-    socket.emit('stopStudy', { groupId: this.state.groupId });
-    // 서버에서 계산한 시간 받아서 반영
-    socket.once('sessionResult', ({ sessionSec }) => {
-      this.state.totalStudySec += sessionSec;
-      this.state.points += Math.floor(sessionSec / 60) * 10;
-      this.saveProgress();
-      this.updateDashboard();
-    });
+
+    if (this.state.groupId) {
+      // 그룹 모드: stopStudy → 서버가 sessionResult 전송
+      socket.emit('stopStudy', { groupId: this.state.groupId });
+    } else {
+      // [수정] 솔로 모드: stopStudySolo → 서버가 sessionResult 전송
+      socket.emit('stopStudySolo');
+    }
+    // 결과는 _bindSocketEvents의 'sessionResult' 리스너에서 처리
   },
 
   // ── 대시보드 업데이트 ─────────────────────────────────────
@@ -307,7 +339,7 @@ function escapeHtml(str) {
 // ── 앱 시작 ──────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => App.init());
 
-// ── [보안] Google GSI 콜백: credential을 서버로 보내 세션 토큰 교환 ──
+// ── [보안] Google GSI 콜백 ───────────────────────────────
 async function handleGoogleLogin(response) {
   if (!response?.credential) return;
   try {
@@ -315,7 +347,6 @@ async function handleGoogleLogin(response) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ credential: response.credential })
-      // [보안] credential은 서버로만 전송하고 localStorage에 저장하지 않음
     });
 
     if (!res.ok) {
@@ -327,7 +358,7 @@ async function handleGoogleLogin(response) {
 
     const { sessionToken, user } = await res.json();
 
-    // [보안] sessionToken(서버 발급)만 저장, Google credential은 저장 안 함
+    // [보안] sessionToken만 저장, credential은 저장 안 함
     localStorage.setItem('studylock_auth', JSON.stringify({
       googleId:     user.googleId,
       name:         user.name,

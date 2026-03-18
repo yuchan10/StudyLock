@@ -150,9 +150,10 @@
     <div class="login-logo">StudyLock</div>
     <div class="login-tagline">집중이 습관이 되는 순간</div>
     <div class="login-google-wrap">
-      <!-- [보안] Google Client ID는 서버에서 주입받아 사용 -->
+      <!-- [보안] Google Client ID는 앱 초기화 시 /api/config에서 동적으로 주입됩니다 -->
+      <!-- data-client_id는 app.js의 _initGoogleSignIn()이 채워줍니다 -->
       <div id="g_id_onload"
-        data-client_id="873434718410-v9k4a2ug741j8ka6sc5mnqjmobb7a2f0.apps.googleusercontent.com"
+        data-client_id=""
         data-callback="handleGoogleLogin"
         data-auto_prompt="false">
       </div>
