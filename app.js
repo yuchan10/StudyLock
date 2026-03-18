@@ -226,10 +226,9 @@ const App = {
         }
         clearInterval(this.state.timerInterval);
         this.state.timerInterval = null;
-        this.state.studying = false;
         document.getElementById('timer-overlay').style.display = 'none';
-        // 서버가 sessionResult 보낼 시간 잠깐 대기
-        await new Promise(r => setTimeout(r, 400));
+        // 서버가 sessionResult 보낼 시간 대기 (studying 플래그는 sessionResult에서 처리)
+        await new Promise(r => setTimeout(r, 600));
       }
       this._pushServerProgress();
       localStorage.removeItem('studylock_auth');
@@ -252,9 +251,10 @@ const App = {
       this.renderGroupInfo();
     });
 
-    // [수정 #3] studying 플래그로 중복 처리 방지 (소켓 재연결 시 이중 합산 차단)
+    // [수정 #3] sessionResult: 마지막 stopStudy 이후 한 번만 처리
     socket.on('sessionResult', ({ sessionSec }) => {
-      if (!this.state.studying) return; // 이미 처리됐거나 공부 중 아님 → 무시
+      // studying 플래그와 무관하게 항상 반영 (플래그 타이밍 이슈 방지)
+      if (sessionSec <= 0) return;
       this.state.studying = false;
       this.state.totalStudySec += sessionSec;
       this.state.points += Math.floor(sessionSec / 60) * 10;
