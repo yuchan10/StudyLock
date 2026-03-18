@@ -1,4 +1,5 @@
-require('dotenv').config();
+// 로컬 개발 환경에서만 .env 로드 (Render 등 배포 환경은 자체 환경변수 사용)
+if (process.env.NODE_ENV !== 'production') require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
