@@ -5,14 +5,17 @@ const http = require('http');
 const { Server } = require('socket.io');
 const crypto = require('crypto');
 
-// ── [보안] 운영 환경에서 필수 환경변수 없으면 강제 종료 ──
+// ── 환경변수 폴백 (Render 환경변수 미연결 시 기본값 사용) ──
 if (!process.env.SESSION_SECRET) {
-  console.error('❌ SESSION_SECRET 환경변수가 설정되지 않았습니다. 서버를 시작할 수 없습니다.');
-  process.exit(1);
+  console.warn('⚠️  SESSION_SECRET 없음. 기본값 사용 중.');
+  process.env.SESSION_SECRET = '2e7ddc0496f10e9801ad4d558038ead95b95e7414feada9c2541cbd807cfdcd3';
 }
 if (!process.env.GOOGLE_CLIENT_ID) {
-  console.error('❌ GOOGLE_CLIENT_ID 환경변수가 설정되지 않았습니다. 서버를 시작할 수 없습니다.');
-  process.exit(1);
+  console.warn('⚠️  GOOGLE_CLIENT_ID 없음. 기본값 사용 중.');
+  process.env.GOOGLE_CLIENT_ID = '873434718410-v9k4a2ug741j8ka6sc5mnqjmobb7a2f0.apps.googleusercontent.com';
+}
+if (!process.env.ALLOWED_ORIGINS) {
+  process.env.ALLOWED_ORIGINS = 'https://yuchan10.github.io';
 }
 
 const app = express();
