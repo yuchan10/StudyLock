@@ -176,6 +176,7 @@ io.use((socket, next) => {
 // ── Socket.io: 실시간 그룹 매칭 ───────────────────────────
 let waitingUsers = [];
 let groups = {};
+let activeSessions = {}; // [보안] 서버에서 시간 관리
 
 io.on('connection', (socket) => {
   console.log('접속:', socket.id);
@@ -203,20 +204,29 @@ io.on('connection', (socket) => {
     if (!group) return;
     const member = group.members.find(m => m.id === socket.id);
     if (!member) return;
+    // [보안] 이미 공부 중이면 무시 (탭 여러개 방지)
+    if (activeSessions[socket.session.googleId]) return;
+    activeSessions[socket.session.googleId] = { startTime: Date.now(), groupId };
     member.status = 'studying';
     io.to(groupId).emit('groupUpdate', group);
   });
 
-  socket.on('stopStudy', ({ groupId, sessionSec }) => {
+  socket.on('stopStudy', ({ groupId }) => {
     if (typeof groupId !== 'string' || !/^group_[a-f0-9]{16}$/.test(groupId)) return;
-    if (!Number.isInteger(sessionSec) || sessionSec < 0 || sessionSec > 86400) return;
     const group = groups[groupId];
     if (!group) return;
     const member = group.members.find(m => m.id === socket.id);
     if (!member) return;
+    // [보안] 서버에서 직접 시간 계산
+    const session = activeSessions[socket.session.googleId];
+    if (!session) return;
+    const sessionSec = Math.floor((Date.now() - session.startTime) / 1000);
+    delete activeSessions[socket.session.googleId];
     member.status = 'idle';
     member.studySec += sessionSec;
     io.to(groupId).emit('groupUpdate', group);
+    // 서버에서 계산한 시간을 해당 유저에게만 전송
+    socket.emit('sessionResult', { sessionSec });
   });
 
   socket.on('disconnect', () => {

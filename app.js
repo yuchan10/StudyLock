@@ -257,10 +257,14 @@ const App = {
   stopStudy() {
     clearInterval(this.state.timerInterval);
     document.getElementById('timer-overlay').style.display = 'none';
-    this.state.points += Math.floor(this.state.sessionSec / 60) * 10;
-    socket.emit('stopStudy', { groupId: this.state.groupId, sessionSec: this.state.sessionSec });
-    this.saveProgress();
-    this.updateDashboard();
+    socket.emit('stopStudy', { groupId: this.state.groupId });
+    // 서버에서 계산한 시간 받아서 반영
+    socket.once('sessionResult', ({ sessionSec }) => {
+      this.state.totalStudySec += sessionSec;
+      this.state.points += Math.floor(sessionSec / 60) * 10;
+      this.saveProgress();
+      this.updateDashboard();
+    });
   },
 
   // ── 대시보드 업데이트 ─────────────────────────────────────
