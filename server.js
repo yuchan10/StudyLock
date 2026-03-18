@@ -18,6 +18,10 @@ if (!process.env.GOOGLE_CLIENT_ID) {
 if (!process.env.ALLOWED_ORIGINS) {
   process.env.ALLOWED_ORIGINS = 'https://yuchan10.github.io';
 }
+if (!process.env.MONGODB_URI) {
+  console.warn('⚠️  MONGODB_URI 없음. 기본값 사용 중.');
+  process.env.MONGODB_URI = 'mongodb+srv://choeyuchan310_db_user:Mp3uqRG4UtC_!zw@cluster0.vq0kmsv.mongodb.net/studylock?retryWrites=true&w=majority';
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -162,10 +166,6 @@ app.post('/api/auth/google', rateLimit(10, 60 * 1000), async (req, res) => {
 
 // ── MongoDB 연결 ─────────────────────────────────────────
 const MONGODB_URI = process.env.MONGODB_URI;
-if (!MONGODB_URI) {
-  console.error('❌ MONGODB_URI 환경변수가 없습니다.');
-  process.exit(1);
-}
 
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('✅ MongoDB 연결 성공'))
