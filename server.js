@@ -24,11 +24,10 @@ app.use(express.static(__dirname));
 // ── [보안] CORS 미들웨어 ──────────────────────────────────
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin || ALLOWED_ORIGINS[0]);
-  }
+  res.header('Access-Control-Allow-Origin', origin || '*');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Credentials', 'true');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
