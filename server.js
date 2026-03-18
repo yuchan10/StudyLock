@@ -7,20 +7,8 @@ const crypto = require('crypto');
 const mongoose = require('mongoose');
 
 // ── 환경변수 폴백 (Render 환경변수 미연결 시 기본값 사용) ──
-if (!process.env.SESSION_SECRET) {
-  console.warn('⚠️  SESSION_SECRET 없음. 기본값 사용 중.');
-  process.env.SESSION_SECRET = '2e7ddc0496f10e9801ad4d558038ead95b95e7414feada9c2541cbd807cfdcd3';
-}
-if (!process.env.GOOGLE_CLIENT_ID) {
-  console.warn('⚠️  GOOGLE_CLIENT_ID 없음. 기본값 사용 중.');
-  process.env.GOOGLE_CLIENT_ID = '873434718410-v9k4a2ug741j8ka6sc5mnqjmobb7a2f0.apps.googleusercontent.com';
-}
 if (!process.env.ALLOWED_ORIGINS) {
   process.env.ALLOWED_ORIGINS = 'https://yuchan10.github.io';
-}
-if (!process.env.MONGODB_URI) {
-  console.warn('⚠️  MONGODB_URI 없음. 기본값 사용 중.');
-  process.env.MONGODB_URI = 'mongodb+srv://choeyuchan310_db_user:Mp3uqRG4UtC_!zw@cluster0.vq0kmsv.mongodb.net/studylock?retryWrites=true&w=majority';
 }
 
 const app = express();
