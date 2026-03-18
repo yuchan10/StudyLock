@@ -34,7 +34,7 @@
     .login-logo { font-size: 2.4rem; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 8px; }
     .login-tagline { font-size: 0.9rem; color: var(--sub); margin-bottom: 64px; }
     .login-google-wrap { display: flex; flex-direction: column; align-items: center; gap: 16px; }
-    .login-google-wrap .g_id_signin { border-radius: 8px; overflow: hidden; }
+    .login-google-wrap #gsi-button-container { border-radius: 8px; overflow: hidden; }
     .login-hint { font-size: 0.75rem; color: #444; text-align: center; }
 
     /* ── 상단 상태바 ── */
@@ -150,18 +150,9 @@
     <div class="login-logo">StudyLock</div>
     <div class="login-tagline">집중이 습관이 되는 순간</div>
     <div class="login-google-wrap">
-      <!-- [보안] Google Client ID는 앱 초기화 시 /api/config에서 동적으로 주입됩니다 -->
-      <!-- data-client_id는 app.js의 _initGoogleSignIn()이 채워줍니다 -->
-      <div id="g_id_onload"
-        data-client_id=""
-        data-callback="handleGoogleLogin"
-        data-auto_prompt="false">
-      </div>
-      <div class="g_id_signin"
-        data-type="standard" data-size="large" data-theme="outline"
-        data-text="signin_with" data-shape="rectangular"
-        data-logo_alignment="left" data-width="280">
-      </div>
+      <!-- Google 로그인 버튼: app.js의 _initGoogleSignIn()이 동적으로 렌더링합니다 -->
+      <!-- g_id_onload 제거 — client_id 없이 자동 초기화되는 문제 방지 -->
+      <div id="gsi-button-container"></div>
       <p class="login-hint">Google 계정으로 간편하게 시작하세요</p>
     </div>
   </div>

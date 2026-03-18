@@ -42,7 +42,8 @@ const App = {
 
   // ── [수정 #1 & #6] Google Client ID 동적 주입 + GSI 로드 대기 + 실패 시 안내 ──
   async _initGoogleSignIn() {
-    // GSI 스크립트 로드 완료 대기 (최대 5초)
+    // [수정] GSI 스크립트 로드 완료 대기 (최대 5초)
+    // g_id_onload div 제거로 자동 초기화 차단 → 여기서만 초기화
     await new Promise(resolve => {
       if (window.google?.accounts?.id) return resolve();
       const limit = Date.now() + 5000;
@@ -54,41 +55,40 @@ const App = {
       }, 50);
     });
 
-    let googleClientId = '';
+    // 서버에서 Client ID 가져오기
+    let clientId = '';
     try {
       const res = await fetch(`${SERVER_URL}/api/config`);
       if (res.ok) {
         const data = await res.json();
-        googleClientId = data.googleClientId || '';
+        clientId = data.googleClientId || '';
       }
     } catch (e) {
       console.warn('서버 설정 로드 실패:', e.message);
     }
 
-    // [수정 #6] 서버 응답 실패 시 기존 data-client_id 폴백 사용
-    const onload = document.getElementById('g_id_onload');
-    const existingId = onload?.getAttribute('data-client_id') || '';
-    const clientId = googleClientId || existingId;
-
+    // [수정 #6] Client ID 없으면 안내 메시지 표시 (빈 화면 방지)
     if (!clientId) {
-      // Client ID 없으면 안내 메시지로 교체 (빈 화면 방지)
       const wrap = document.querySelector('.login-google-wrap');
-      if (wrap) wrap.innerHTML = '<p style="color:#666;font-size:0.85rem;text-align:center;line-height:1.8;">서버에 연결할 수 없습니다.<br>잠시 후 다시 시도해 주세요.</p>';
+      if (wrap) wrap.innerHTML = '<p style="color:#666;font-size:0.85rem;text-align:center;line-height:1.8;">서버에 연결할 수 없습니다.<br>잠시 후 새로고침해 주세요.</p>';
       return;
     }
 
-    if (onload) onload.setAttribute('data-client_id', clientId);
+    const container = document.getElementById('gsi-button-container');
+    if (!container) return;
 
     if (window.google?.accounts?.id) {
+      // [수정] initialize 한 번만 호출 (g_id_onload 제거로 중복 호출 방지)
       google.accounts.id.initialize({
         client_id: clientId,
         callback: handleGoogleLogin,
         auto_select: false
       });
-      google.accounts.id.renderButton(
-        document.querySelector('.g_id_signin'),
-        { type: 'standard', size: 'large', theme: 'outline', text: 'signin_with', shape: 'rectangular', logo_alignment: 'left', width: 280 }
-      );
+      google.accounts.id.renderButton(container, {
+        type: 'standard', size: 'large', theme: 'outline',
+        text: 'signin_with', shape: 'rectangular',
+        logo_alignment: 'left', width: 280
+      });
     }
   },
 
