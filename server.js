@@ -1,5 +1,9 @@
 require('dotenv').config({ path: '.env' });
 
+// 임시: 환경변수 직접 설정 (Render 환경변수 문제 해결 후 제거)
+process.env.SESSION_SECRET = process.env.SESSION_SECRET || '2e7ddc0496f10e9801ad4d558038ead95b95e7414feada9c2541cbd807cfdcd3';
+process.env.GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '873434718410-v9k4a2ug741j8ka6sc5mnqjmobb7a2f0.apps.googleusercontent.com';
+process.env.ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS || 'https://yuchan10.github.io';
 // [임시 디버그] 환경변수 확인 후 제거 예정
 console.log('ENV CHECK:', {
   HAS_SECRET: !!process.env.SESSION_SECRET,
