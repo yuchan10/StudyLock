@@ -4,6 +4,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 
 // ── 환경변수 폴백 (Render 환경변수 미연결 시 기본값 사용) ──
 if (!process.env.SESSION_SECRET) {
@@ -159,19 +160,38 @@ app.post('/api/auth/google', rateLimit(10, 60 * 1000), async (req, res) => {
   });
 });
 
-// ── 유저 데이터 저장소 (인메모리) ────────────────────────
-// ⚠️ 운영 환경에서는 Redis 또는 외부 DB로 교체 권장
-// Render.com free tier는 디스크가 휘발성이므로 파일 저장 제거
-// TODO: process.env.DATABASE_URL 추가 시 DB 연결로 분기
-let userData = {};
+// ── MongoDB 연결 ─────────────────────────────────────────
+const MONGODB_URI = process.env.MONGODB_URI;
+if (!MONGODB_URI) {
+  console.error('❌ MONGODB_URI 환경변수가 없습니다.');
+  process.exit(1);
+}
+
+mongoose.connect(MONGODB_URI)
+  .then(() => console.log('✅ MongoDB 연결 성공'))
+  .catch(err => { console.error('❌ MongoDB 연결 실패:', err.message); process.exit(1); });
+
+// ── 유저 데이터 스키마 ────────────────────────────────────
+const userSchema = new mongoose.Schema({
+  googleId:     { type: String, required: true, unique: true },
+  totalStudySec: { type: Number, default: 0 },
+  points:       { type: Number, default: 0 },
+  lastSaved:    { type: Date, default: Date.now }
+});
+const User = mongoose.model('User', userSchema);
 
 // ── REST API: 데이터 불러오기 ─────────────────────────────
-app.get('/api/progress/:googleId', rateLimit(60, 60 * 1000), requireAuth, (req, res) => {
-  res.json(userData[req.params.googleId] || { totalStudySec: 0, points: 0 });
+app.get('/api/progress/:googleId', rateLimit(60, 60 * 1000), requireAuth, async (req, res) => {
+  try {
+    const user = await User.findOne({ googleId: req.params.googleId });
+    res.json(user ? { totalStudySec: user.totalStudySec, points: user.points } : { totalStudySec: 0, points: 0 });
+  } catch (e) {
+    res.status(500).json({ error: 'DB 오류' });
+  }
 });
 
 // ── REST API: 데이터 저장 ─────────────────────────────────
-app.post('/api/progress/:googleId', rateLimit(30, 60 * 1000), requireAuth, (req, res) => {
+app.post('/api/progress/:googleId', rateLimit(30, 60 * 1000), requireAuth, async (req, res) => {
   const { googleId } = req.params;
   const { totalStudySec, points } = req.body;
 
@@ -185,14 +205,24 @@ app.post('/api/progress/:googleId', rateLimit(30, 60 * 1000), requireAuth, (req,
     return res.status(400).json({ error: '비정상적인 포인트 값입니다.' });
   }
 
-  const existing = userData[googleId] || { totalStudySec: 0, points: 0 };
-  const maxIncrease = 3600;
-  userData[googleId] = {
-    totalStudySec: Math.min(totalStudySec, existing.totalStudySec + maxIncrease),
-    points: Math.min(points, existing.points + Math.floor(maxIncrease / 6) * 10),
-    lastSaved: new Date().toISOString()
-  };
-  res.json({ ok: true, data: userData[googleId] });
+  try {
+    const existing = await User.findOne({ googleId }) || { totalStudySec: 0, points: 0 };
+    const maxIncrease = 3600;
+    const updated = await User.findOneAndUpdate(
+      { googleId },
+      {
+        $set: {
+          totalStudySec: Math.min(totalStudySec, existing.totalStudySec + maxIncrease),
+          points: Math.min(points, existing.points + Math.floor(maxIncrease / 6) * 10),
+          lastSaved: new Date()
+        }
+      },
+      { upsert: true, new: true }
+    );
+    res.json({ ok: true, data: { totalStudySec: updated.totalStudySec, points: updated.points } });
+  } catch (e) {
+    res.status(500).json({ error: 'DB 오류' });
+  }
 });
 
 // ── Socket.io: 인증 미들웨어 ──────────────────────────────
