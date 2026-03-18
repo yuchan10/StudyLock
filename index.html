@@ -150,8 +150,8 @@
     <div class="login-logo">StudyLock</div>
     <div class="login-tagline">집중이 습관이 되는 순간</div>
     <div class="login-google-wrap">
+      <!-- [보안] Google Client ID는 서버에서 주입받아 사용 -->
       <div id="g_id_onload"
-        data-client_id="873434718410-v9k4a2ug741j8ka6sc5mnqjmobb7a2f0.apps.googleusercontent.com"
         data-callback="handleGoogleLogin"
         data-auto_prompt="false">
       </div>
@@ -160,6 +160,22 @@
         data-text="signin_with" data-shape="rectangular"
         data-logo_alignment="left" data-width="280">
       </div>
+      <script>
+        // 서버에서 Google Client ID를 받아와 동적으로 설정
+        (async () => {
+          try {
+            const serverUrl = window.STUDYLOCK_SERVER_URL || 'https://studylock-server.onrender.com';
+            const res = await fetch(serverUrl + '/api/config');
+            const cfg = await res.json();
+            document.getElementById('g_id_onload').setAttribute('data-client_id', cfg.googleClientId);
+            // GSI 스크립트가 이미 로드된 경우 초기화
+            if (window.google?.accounts?.id) {
+              google.accounts.id.initialize({ client_id: cfg.googleClientId, callback: handleGoogleLogin });
+              google.accounts.id.renderButton(document.querySelector('.g_id_signin'), { theme: 'outline', size: 'large', text: 'signin_with', shape: 'rectangular', logo_alignment: 'left', width: '280' });
+            }
+          } catch(e) { console.error('설정 로드 실패:', e); }
+        })();
+      </script>
       <p class="login-hint">Google 계정으로 간편하게 시작하세요</p>
     </div>
   </div>
